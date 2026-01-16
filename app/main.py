@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 import httpx
@@ -13,10 +14,43 @@ from .events import stream_events
 from .task_manager import TaskManager
 
 
+logger = logging.getLogger("app")
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
+for name in ("app", "app.task_manager", "agent.loop", "agent.browser"):
+    logging.getLogger(name).setLevel(logging.INFO)
+
 settings = Settings.from_env()
 manager = TaskManager(settings)
 
 app = FastAPI(title="Browser Agent")
+
+
+@app.on_event("startup")
+def _log_startup() -> None:
+    provider = settings.llm_provider
+    if provider == "anthropic":
+        model = settings.anthropic_model
+    elif provider in {"gemini", "google"}:
+        model = settings.gemini_model
+    else:
+        model = settings.openai_model
+    logger.info(
+        "Startup provider=%s model=%s dry_run=%s",
+        provider,
+        model,
+        settings.dry_run,
+    )
+    logger.info(
+        "Browser engine=%s channel=%s headless=%s profile=%s",
+        settings.browser_engine,
+        settings.browser_channel or "-",
+        settings.browser_headless,
+        settings.browser_user_data_dir,
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,7 +65,6 @@ class TaskCreate(BaseModel):
     prompt: str
     browser_only: bool = True
     search_engine: Optional[str] = None
-    create_window: bool = True
 
 
 class ModelListRequest(BaseModel):
@@ -58,7 +91,6 @@ def create_task(payload: TaskCreate):
             payload.prompt,
             browser_only=payload.browser_only,
             search_engine=payload.search_engine,
-            create_window=payload.create_window,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

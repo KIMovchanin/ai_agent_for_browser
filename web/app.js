@@ -7,7 +7,6 @@ const stopBtn = document.getElementById('stop');
 const statusEl = document.getElementById('status');
 const logEl = document.getElementById('log');
 const browserOnlyEl = document.getElementById('browser-only');
-const createWindowEl = document.getElementById('create-window');
 const searchEngineEl = document.getElementById('search-engine');
 const settingsButton = document.getElementById('settings-button');
 const settingsPanel = document.getElementById('settings-panel');
@@ -55,6 +54,7 @@ function resetUI() {
   logEl.textContent = '';
   confirmBtn.disabled = true;
   stopBtn.disabled = true;
+  runBtn.disabled = false;
   setStatus('Idle');
 }
 
@@ -83,11 +83,6 @@ function loadSettings() {
   if (storedBrowserOnly !== null && browserOnlyEl) {
     browserOnlyEl.checked = storedBrowserOnly === 'true';
   }
-
-  const storedCreateWindow = localStorage.getItem('create_window');
-  if (storedCreateWindow !== null && createWindowEl) {
-    createWindowEl.checked = storedCreateWindow === 'true';
-  }
 }
 
 function bindSettings() {
@@ -106,12 +101,6 @@ function bindSettings() {
   if (browserOnlyEl) {
     browserOnlyEl.addEventListener('change', () => {
       localStorage.setItem('browser_only', String(browserOnlyEl.checked));
-    });
-  }
-
-  if (createWindowEl) {
-    createWindowEl.addEventListener('change', () => {
-      localStorage.setItem('create_window', String(createWindowEl.checked));
     });
   }
 
@@ -197,7 +186,8 @@ function connectEvents(id) {
     const payload = JSON.parse(event.data);
     const data = payload.data || {};
     const message = `[${data.step || ''}] ${data.tool || ''} ${data.status || ''} ${data.reason || ''}`;
-    appendLog(message.trim());
+    const errorText = data.error ? ` | error: ${data.error}` : '';
+    appendLog(`${message}${errorText}`.trim());
   });
   eventSource.addEventListener('needs_confirmation', (event) => {
     const payload = JSON.parse(event.data);
@@ -227,6 +217,7 @@ function connectEvents(id) {
     if (['done', 'stopped', 'error'].includes(data.status)) {
       confirmBtn.disabled = true;
       stopBtn.disabled = true;
+      runBtn.disabled = false;
       if (eventSource) {
         eventSource.close();
       }
@@ -245,13 +236,13 @@ runBtn.addEventListener('click', async () => {
   }
   resetUI();
   setStatus('Starting task...');
+  runBtn.disabled = true;
   const response = await fetch(`${API_BASE}/tasks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       prompt,
       browser_only: browserOnlyEl.checked,
-      create_window: createWindowEl.checked,
       search_engine: searchEngineEl.value,
     }),
   });
@@ -259,6 +250,7 @@ runBtn.addEventListener('click', async () => {
     const err = await response.json();
     appendLog(`Failed to start: ${err.detail || response.statusText}`);
     setStatus('Error');
+    runBtn.disabled = false;
     return;
   }
   const data = await response.json();

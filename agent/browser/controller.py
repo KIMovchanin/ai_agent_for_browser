@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 import time
 from typing import Any, Dict, Optional, Tuple
@@ -14,6 +15,8 @@ from playwright.sync_api import Page, sync_playwright
 from ..config import Settings
 from .snapshot import build_snapshot
 
+logger = logging.getLogger("agent.browser")
+
 
 class BrowserController:
     def __init__(self, settings: Settings, start_new_window: bool = True) -> None:
@@ -21,6 +24,13 @@ class BrowserController:
         self.settings.ensure_dirs()
         self.playwright = sync_playwright().start()
         engine, channel = self._resolve_browser_config()
+        logger.info(
+            "Launching browser engine=%s channel=%s headless=%s profile=%s",
+            engine,
+            channel or "-",
+            self.settings.browser_headless,
+            self.settings.browser_user_data_dir,
+        )
         browser_type = getattr(self.playwright, engine, self.playwright.chromium)
         launch_kwargs = {
             "user_data_dir": str(self.settings.browser_user_data_dir),
@@ -39,17 +49,27 @@ class BrowserController:
                 self.context = self.playwright.chromium.launch_persistent_context(**launch_kwargs)
             else:
                 raise
-        if start_new_window:
-            self.page = self.context.new_page()
-            self.page.bring_to_front()
-        elif self.context.pages:
-            self.page = self.context.pages[0]
-        else:
-            self.page = self.context.new_page()
+        timeout_ms = max(self.settings.request_timeout_s, 5) * 1000
+        self.context.set_default_timeout(timeout_ms)
+        self.context.set_default_navigation_timeout(timeout_ms)
 
         self.last_snapshot: Optional[Dict[str, Any]] = None
+        self.select_page(start_new_window)
         if self.settings.trace_enabled:
             self.context.tracing.start(screenshots=True, snapshots=True, sources=True)
+
+    def select_page(self, start_new_window: bool) -> None:
+        pages = [page for page in self.context.pages if not page.is_closed()]
+        logger.info("Select page new_window=%s existing_pages=%s", start_new_window, len(pages))
+        if start_new_window or not pages:
+            self.page = self.context.new_page()
+        else:
+            self.page = pages[-1]
+        try:
+            self.page.bring_to_front()
+        except Exception:
+            pass
+        self.last_snapshot = None
 
     def _resolve_browser_config(self) -> Tuple[str, Optional[str]]:
         engine = (self.settings.browser_engine or "chromium").strip().lower()
@@ -103,6 +123,8 @@ class BrowserController:
         return snapshot
 
     def navigate(self, url: str) -> None:
+        if self.page.is_closed():
+            self.select_page(start_new_window=True)
         self.page.goto(url, wait_until="domcontentloaded")
 
     def back(self) -> None:

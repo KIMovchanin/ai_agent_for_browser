@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
@@ -18,6 +19,8 @@ from .memory.summarizer import Summarizer
 from .tools.actions import ToolExecutor
 from .tools.security import SecurityPolicy
 
+logger = logging.getLogger("agent.loop")
+
 
 @dataclass
 class PendingAction:
@@ -34,7 +37,9 @@ class AgentSession:
         emit: Optional[Callable[[str, Dict[str, Any]], None]] = None,
         browser_only: bool = True,
         search_engine_url: Optional[str] = None,
-        create_window: bool = True,
+        create_window: bool = False,
+        controller: Optional[BrowserController] = None,
+        close_controller: bool = True,
     ) -> None:
         self.goal = goal
         self.settings = settings
@@ -42,10 +47,14 @@ class AgentSession:
         self.browser_only = browser_only
         self.has_browser_action = False
         self.search_engine_url = search_engine_url or settings.search_engine_url
-        self.create_window = create_window
-
         self.llm = create_llm(settings)
-        self.controller = BrowserController(settings, start_new_window=create_window)
+        if controller:
+            self.controller = controller
+            self.close_controller = close_controller
+            self.controller.select_page(create_window)
+        else:
+            self.controller = BrowserController(settings, start_new_window=create_window)
+            self.close_controller = True
         self.memory = MemoryState(max_steps=settings.max_steps)
         self.summarizer = Summarizer(self.llm)
 
@@ -260,6 +269,8 @@ class AgentSession:
 
         if status == "error" and self.error_count > self.settings.max_retries:
             self._pause_for_user("Action failed repeatedly. Please assist.")
+        if status == "error":
+            logger.warning("Tool error tool=%s error=%s", tool_call.name, error)
 
     def _update_progress(self, snapshot: Dict[str, Any]) -> None:
         url = snapshot.get("url")
@@ -273,6 +284,7 @@ class AgentSession:
 
     def _bootstrap_browser(self) -> None:
         url = self._bootstrap_url(self.goal)
+        logger.info("Bootstrap navigate url=%s", url)
         status = "ok"
         error = None
         snapshot: Dict[str, Any] = {}
@@ -282,13 +294,20 @@ class AgentSession:
             self.has_browser_action = True
             snapshot = self.controller.snapshot()
         except Exception as exc:  # pylint: disable=broad-except
-            status = "error"
-            error = str(exc)
-            self.error_count += 1
             try:
+                self.controller.select_page(start_new_window=True)
+                self.tool_executor.execute("navigate", {"url": url})
+                self.has_browser_action = True
                 snapshot = self.controller.snapshot()
-            except Exception:
-                snapshot = {}
+            except Exception as retry_exc:  # pylint: disable=broad-except
+                status = "error"
+                error = f"{exc} | retry: {retry_exc}"
+                self.error_count += 1
+                try:
+                    snapshot = self.controller.snapshot()
+                except Exception:
+                    snapshot = {}
+                logger.warning("Bootstrap navigate failed error=%s", error)
 
         record = StepRecord(
             step=self.step,
@@ -327,10 +346,7 @@ class AgentSession:
         www_match = re.search(r"\\bwww\\.[^\\s]+", prompt)
         if www_match:
             return f"https://{www_match.group(0).rstrip(').,;')}"
-        domain_match = re.search(
-            r"\\b[\\w.-]+\\.(com|org|net|ru|io|ai|app|dev|edu|gov|co)\\b",
-            prompt,
-        )
+        domain_match = re.search(r"\\b([a-z0-9-]+\\.)+[a-z]{2,10}\\b", prompt, re.IGNORECASE)
         if domain_match:
             return f"https://{domain_match.group(0)}"
         return self.search_engine_url or "https://www.google.com"
@@ -338,16 +354,20 @@ class AgentSession:
     def _pause_for_user(self, question: str) -> None:
         self.waiting_user = True
         self.user_question = question
+        logger.info("Pause for user question=%s", question)
         self._emit("needs_user_input", {"question": question})
 
     def _finish(self, result: str) -> None:
         self.done = True
         self.result = result
+        logger.info("Finish result=%s", result)
         self._emit("result", {"result": result})
         self._emit("status", {"status": "done"})
         self._close()
 
     def _close(self) -> None:
+        if not self.close_controller:
+            return
         try:
             self.controller.close()
         except Exception:

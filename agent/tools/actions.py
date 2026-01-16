@@ -41,6 +41,45 @@ class ToolExecutor:
         self.extractor = extractor
         self.settings = settings
 
+    @staticmethod
+    def _looks_like_search_field(element: Dict[str, Any]) -> bool:
+        role = (element.get("role") or "").lower()
+        if "search" in role:
+            return True
+        haystack = " ".join(
+            [
+                element.get("name") or "",
+                element.get("aria_label") or "",
+                element.get("text") or "",
+            ]
+        ).lower()
+        search_markers = [
+            "search",
+            "find",
+            "query",
+            "\u043f\u043e\u0438\u0441\u043a",
+            "\u043d\u0430\u0439\u0442\u0438",
+            "\u043f\u043e\u0438\u0441\u043a\u043e\u0432",
+        ]
+        exclude_markers = [
+            "email",
+            "e-mail",
+            "password",
+            "phone",
+            "login",
+            "username",
+            "\u043f\u0430\u0440\u043e\u043b\u044c",
+            "\u043f\u043e\u0447\u0442\u0430",
+            "\u0442\u0435\u043b\u0435\u0444\u043e\u043d",
+            "\u043b\u043e\u0433\u0438\u043d",
+            "\u043a\u043e\u0434",
+            "2fa",
+            "otp",
+        ]
+        if any(marker in haystack for marker in exclude_markers):
+            return False
+        return any(marker in haystack for marker in search_markers)
+
     def execute(self, name: str, args: Dict[str, Any]) -> ToolResult:
         if name == "navigate":
             url = args.get("url", "")
@@ -62,7 +101,11 @@ class ToolExecutor:
                 strategy=args.get("click_strategy"),
             )
             text = args.get("text", "")
-            press_enter = bool(args.get("press_enter"))
+            press_enter_arg = args.get("press_enter")
+            if press_enter_arg is None and self._looks_like_search_field(element):
+                press_enter = True
+            else:
+                press_enter = bool(press_enter_arg)
             self.controller.type(element, text, press_enter=press_enter)
             return ToolResult(name=name, output={"element_id": element.get("id")})
         if name == "scroll":

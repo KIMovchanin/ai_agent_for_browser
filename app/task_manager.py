@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import threading
 import time
@@ -9,6 +10,7 @@ from dataclasses import dataclass, field
 from queue import Queue
 from typing import Any, Callable, Deque, Dict, Optional
 
+from agent.browser.controller import BrowserController
 from agent.config import Settings
 from agent.llm import create_llm
 from agent.llm.base import LLMError
@@ -25,12 +27,10 @@ class Task:
     mode: str = "agent"
     browser_only: bool = True
     search_engine: str = "google"
-    create_window: bool = True
     result: Optional[str] = None
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     event_history: Deque[Dict[str, Any]] = field(default_factory=lambda: deque(maxlen=200))
-    thread: Optional[threading.Thread] = None
 
 
 class TaskManager:
@@ -38,58 +38,53 @@ class TaskManager:
         self.settings = settings
         self.tasks: Dict[str, Task] = {}
         self.lock = threading.Lock()
+        self.worker_queue: Queue[str] = Queue()
+        self.worker_thread: Optional[threading.Thread] = None
+        self.worker_controller: Optional[BrowserController] = None
+        self.logger = logging.getLogger("app.task_manager")
 
     def create_task(
         self,
         prompt: str,
         browser_only: bool = True,
         search_engine: Optional[str] = None,
-        create_window: bool = True,
     ) -> Task:
         with self.lock:
-            if any(task.status in {"running", "waiting_confirm", "waiting_user"} for task in self.tasks.values()):
+            if any(
+                task.status in {"queued", "running", "waiting_confirm", "waiting_user"}
+                for task in self.tasks.values()
+            ):
                 raise RuntimeError("Only one active task is supported with a shared browser profile.")
             task_id = uuid.uuid4().hex
-            session = None
             mode = "agent"
-            if not browser_only and not self._is_browser_task(prompt):
+            if not browser_only and self._force_direct(prompt):
                 mode = "direct"
+            elif not browser_only and not self._is_browser_task(prompt):
+                mode = "direct"
+            self.logger.info(
+                "Create task id=%s mode=%s browser_only=%s search_engine=%s prompt=%s",
+                task_id,
+                mode,
+                browser_only,
+                search_engine or "default",
+                self._compact(prompt),
+            )
 
-            if mode == "agent":
-                search_url = self._resolve_search_engine(search_engine)
-                try:
-                    session = AgentSession(
-                        goal=prompt,
-                        settings=self.settings,
-                        emit=None,
-                        browser_only=browser_only,
-                        search_engine_url=search_url,
-                        create_window=create_window,
-                    )
-                except LLMError as exc:
-                    raise ValueError(str(exc)) from exc
-            else:
-                try:
-                    create_llm(self.settings)
-                except LLMError as exc:
-                    raise ValueError(str(exc)) from exc
             events: Queue = Queue()
             task = Task(
                 task_id=task_id,
                 prompt=prompt,
-                status="created",
-                session=session,
+                status="queued",
+                session=None,
                 events=events,
                 mode=mode,
                 browser_only=browser_only,
                 search_engine=(search_engine or "google"),
-                create_window=create_window,
             )
-            if task.session:
-                task.session.emit = self._build_emitter(task)
             self.tasks[task_id] = task
 
-        self._spawn(task)
+        self._emit(task, "status", {"status": task.status})
+        self._enqueue(task)
         return task
 
     def get_task(self, task_id: str) -> Task:
@@ -101,33 +96,75 @@ class TaskManager:
     def confirm_task(self, task_id: str) -> Task:
         task = self.get_task(task_id)
         if task.session:
+            self.logger.info("Confirm task id=%s status=%s", task.task_id, task.status)
             task.session.confirm()
-            self._spawn(task)
+            self._enqueue(task)
         return task
 
     def stop_task(self, task_id: str) -> Task:
         task = self.get_task(task_id)
         if task.session:
+            self.logger.info("Stop task id=%s status=%s", task.task_id, task.status)
             task.session.request_stop()
-            self._spawn(task)
+            self._enqueue(task)
         else:
             task.status = "stopped"
             self._emit(task, "status", {"status": task.status})
         return task
 
-    def _spawn(self, task: Task) -> None:
-        if task.thread and task.thread.is_alive():
+    def _ensure_worker(self) -> None:
+        if self.worker_thread and self.worker_thread.is_alive():
             return
-        task.thread = threading.Thread(target=self._run_task, args=(task,), daemon=True)
-        task.thread.start()
+        self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self.worker_thread.start()
+        self.logger.info("Worker thread started")
 
-    def _run_task(self, task: Task) -> None:
+    def _enqueue(self, task: Task) -> None:
+        self._ensure_worker()
+        self.worker_queue.put(task.task_id)
+
+    def _worker_loop(self) -> None:
+        while True:
+            task_id = self.worker_queue.get()
+            task = self.tasks.get(task_id)
+            if task:
+                self._process_task(task)
+            self.worker_queue.task_done()
+
+    def _process_task(self, task: Task) -> None:
         try:
             task.status = "running"
             task.updated_at = time.time()
+            self.logger.info(
+                "Task start id=%s mode=%s browser_only=%s search_engine=%s",
+                task.task_id,
+                task.mode,
+                task.browser_only,
+                task.search_engine,
+            )
             if task.mode == "direct":
                 self._run_direct(task)
-            elif task.session:
+            elif task.mode == "agent":
+                if not task.session:
+                    try:
+                        search_url = self._resolve_search_engine(task.search_engine)
+                        controller = self._get_worker_controller()
+                        task.session = AgentSession(
+                            goal=task.prompt,
+                            settings=self.settings,
+                            emit=None,
+                            browser_only=task.browser_only,
+                            search_engine_url=search_url,
+                            create_window=False,
+                            controller=controller,
+                            close_controller=False,
+                        )
+                        task.session.emit = self._build_emitter(task)
+                    except LLMError as exc:
+                        task.status = "error"
+                        self._emit(task, "error", {"error": str(exc)})
+                        self._emit(task, "status", {"status": task.status})
+                        return
                 task.session.run()
                 task.updated_at = time.time()
 
@@ -155,6 +192,7 @@ class TaskManager:
         try:
             llm = create_llm(self.settings)
             reason = "Browser-only disabled and task is not explicit."
+            self.logger.info("Direct mode id=%s reason=%s", task.task_id, reason)
             response = llm.complete(
                 messages=[
                     {
@@ -182,11 +220,40 @@ class TaskManager:
             self._emit(task, "error", {"error": str(exc)})
 
     @staticmethod
+    def _force_direct(prompt: str) -> bool:
+        text = prompt.lower()
+        markers = [
+            "failed to start",
+            "event stream error",
+            "traceback",
+            "stack trace",
+            "exception",
+            "error:",
+            "\u043e\u0448\u0438\u0431\u043a",
+            "\u0438\u0441\u043a\u043b\u044e\u0447\u0435\u043d",
+            "\u0442\u0440\u0435\u0439\u0441\u0431\u0435\u043a",
+            "\u0441\u0442\u0435\u043a\u0442\u0440\u0435\u0439\u0441",
+            "\u0447\u0442\u043e \u0437\u0430 \u043e\u0448\u0438\u0431\u043a",
+            "\u043f\u043e\u0447\u0435\u043c\u0443 \u043e\u0448\u0438\u0431\u043a",
+            "\u043e\u0431\u044a\u044f\u0441\u043d\u0438 \u043e\u0448\u0438\u0431\u043a",
+            "\u043d\u0435 \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0439",
+            "\u043d\u0435 \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0439 \u043e\u043a\u043d\u0430",
+            "\u043d\u0435 \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0439 \u0431\u0440\u0430\u0443\u0437\u0435\u0440",
+            "\u0431\u0435\u0437 \u0431\u0440\u0430\u0443\u0437\u0435\u0440",
+            "\u0431\u0435\u0437 \u043e\u043a\u043d",
+            "no browser",
+            "without browser",
+            "do not open",
+            "don't open",
+        ]
+        return any(marker in text for marker in markers)
+
+    @staticmethod
     def _is_browser_task(prompt: str) -> bool:
         text = prompt.lower()
         if re.search(r"https?://|www\\.", text):
             return True
-        if re.search(r"\\b\\w+\\.(com|org|net|ru|io|ai|app|dev|edu|gov|co)\\b", text):
+        if re.search(r"\\b([a-z0-9-]+\\.)+[a-z]{2,10}\\b", text, re.IGNORECASE):
             return True
         actions = [
             "open",
@@ -247,6 +314,70 @@ class TaskManager:
         }
         task.events.put(event)
         task.event_history.append(event)
+        self._log_event(task, event_type, data)
+
+    def _log_event(self, task: Task, event_type: str, data: Dict[str, Any]) -> None:
+        if event_type == "log":
+            self.logger.info(
+                "Event log id=%s step=%s tool=%s status=%s reason=%s url=%s title=%s error=%s",
+                task.task_id,
+                data.get("step"),
+                data.get("tool"),
+                data.get("status"),
+                self._compact(data.get("reason")),
+                self._compact(data.get("url")),
+                self._compact(data.get("title")),
+                self._compact(data.get("error")),
+            )
+            return
+        if event_type == "status":
+            self.logger.info("Event status id=%s status=%s", task.task_id, data.get("status"))
+            return
+        if event_type == "needs_confirmation":
+            self.logger.info(
+                "Event confirm id=%s tool=%s summary=%s",
+                task.task_id,
+                data.get("tool"),
+                self._compact(data.get("summary")),
+            )
+            return
+        if event_type == "needs_user_input":
+            self.logger.info(
+                "Event user_input id=%s question=%s",
+                task.task_id,
+                self._compact(data.get("question")),
+            )
+            return
+        if event_type == "result":
+            self.logger.info("Event result id=%s result=%s", task.task_id, self._compact(data.get("result")))
+            return
+        if event_type == "error":
+            self.logger.info("Event error id=%s error=%s", task.task_id, self._compact(data.get("error")))
+
+    @staticmethod
+    def _compact(value: Optional[str], limit: int = 200) -> str:
+        if value is None:
+            return ""
+        text = " ".join(str(value).split())
+        if len(text) > limit:
+            return text[:limit] + "..."
+        return text
+
+    def _get_worker_controller(self) -> BrowserController:
+        if self.worker_controller:
+            try:
+                self.worker_controller.select_page(start_new_window=False)
+                return self.worker_controller
+            except Exception:
+                try:
+                    self.worker_controller.close()
+                except Exception:
+                    pass
+                self.worker_controller = None
+
+        self.worker_controller = BrowserController(self.settings, start_new_window=False)
+        self.logger.info("Created worker controller")
+        return self.worker_controller
 
     @staticmethod
     def _resolve_search_engine(value: Optional[str]) -> str:

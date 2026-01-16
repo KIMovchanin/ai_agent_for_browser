@@ -32,6 +32,9 @@ class Navigator:
         system_prompt = (
             "You are the Navigator sub-agent. Your job is to move through the website and "
             "reach the right page or UI state. Use only one tool call. "
+            "If the goal includes a URL or domain name, navigate to it directly (do not search for it). "
+            "If you type into a search box, prefer setting press_enter=true to submit. "
+            "If a search results page is visible, click the most relevant result link to reach the target site. "
             "Avoid destructive actions. If login, 2FA, or captcha is needed, use ask_user. "
             "Prefer click/type on elements from snapshot by element_id."
             + browser_note
