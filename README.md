@@ -1,3 +1,5 @@
+[English](#browser-agent-mvp) | [Русская версия](#русская-версия)
+
 # Browser Agent MVP
 
 Working MVP of an autonomous browser agent that controls a visible Playwright browser, accepts a text task, and loops Observe -> Decide -> Act -> Reflect/Retry. It supports persistent sessions, tool-driven LLM actions, security gating, and live logs over SSE.
@@ -172,3 +174,178 @@ This MVP was built with Codex CLI as the coding assistant. Prompts, architecture
 - Better element ranking and accessibility mapping.
 - Structured user inputs for forms and credentials (without storing secrets).
 - More robust per-site pop-up handling and dialog dismissal.
+
+## Русская версия
+
+Рабочий MVP автономного агента, который управляет видимым браузером Playwright, принимает текстовую задачу и выполняет цикл Observe -> Decide -> Act -> Reflect/Retry. Поддерживает persistent сессии, tool-driven действия LLM, защитный gate для опасных действий и live-логи через SSE.
+
+## Архитектура
+
+- Playwright (headful, persistent profile) для автоматизации реального браузера
+- Провайдер-агностичный слой LLM (по умолчанию OpenAI-compatible, Anthropic опционально)
+- Coordinator + под-агенты (Navigator, Extractor, Reflector)
+- Реестр инструментов и исполняющий слой с security gate
+- FastAPI backend с SSE логами
+- Минимальный PHP UI для ввода промпта + live лог + confirm/stop
+
+Persistent сессии хранятся в `.browser-data`, чтобы можно было войти один раз и переиспользовать сессию между запусками.
+
+Структура проекта:
+
+- agent/ - AI агент, управление браузером, память, инструменты
+- app/ - FastAPI API и SSE
+- web/ - PHP UI
+
+## Почему так
+
+- Playwright persistent context сохраняет куки и сессии между запусками.
+- Accessibility-like snapshot: общий скан интерактивных элементов + summary видимого текста.
+- Tool calling: LLM решает, какое действие выполнить; код их исполняет.
+- Управление контекстом: суммаризация истории, отдельное хранение фактов, ограничение размера snapshot.
+- Обработка ошибок: ретраи, режим reflection, скриншот при ошибках.
+- Security layer: рискованные действия требуют явного подтверждения пользователя.
+
+## Установка
+
+Требования:
+
+- Python 3.13
+- PHP 8+ (для UI)
+
+Версии:
+
+- Python 3.13
+- Версии пакетов фиксируются `requirements.txt` на момент установки.
+
+Установка:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+playwright install
+```
+
+Настройка env:
+
+```bash
+cp .env.example .env
+```
+
+Укажите хотя бы один LLM ключ или включите dry-run.
+
+Dry-run режим:
+
+- Установите `DRY_RUN=1` или оставьте API ключи пустыми для запуска без доступа к LLM.
+
+Выбор провайдера:
+
+- `LLM_PROVIDER=openai|anthropic|gemini|google|mock`
+
+OpenAI-compatible конфиг:
+
+```
+LLM_PROVIDER=openai
+OPENAI_API_KEY=your_key_here
+OPENAI_MODEL=o4-mini
+```
+
+Anthropic конфиг:
+
+```
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=your_key_here
+ANTHROPIC_MODEL=claude-3-5-sonnet-latest
+```
+
+Google AI Studio (Gemini) конфиг:
+
+```
+LLM_PROVIDER=gemini
+GOOGLE_API_KEY=your_key_here
+GEMINI_MODEL=gemini-2.5-flash-lite
+```
+
+Доступность модели Gemini проверяется на старте задачи через ListModels. Если модель недоступна или не поддерживает `generateContent`, API вернет 400 с подсказкой.
+
+Выбор браузера и поисковика:
+
+- `BROWSER_ENGINE=auto|chromium|firefox` (auto пытается использовать браузер по умолчанию в Windows; при сбое — Chromium)
+- `BROWSER_CHANNEL=chrome|msedge` (опционально, только Chromium)
+- `SEARCH_ENGINE_URL=https://www.google.com` (используется при bootstrap поиска для browser-only задач)
+
+## Запуск
+
+Запуск API:
+
+```bash
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
+```
+
+Запуск UI:
+
+```bash
+php -S localhost:8000 -t web
+```
+
+Откройте http://localhost:8000 и отправьте задачу.
+
+## Демо-задачи (публичные сайты, без логина)
+
+1) "Open https://www.wikipedia.org, search for Ada Lovelace, and summarize 3 facts."
+2) "Open https://news.ycombinator.com, open the top story, and summarize the first paragraph."
+
+## Security gate
+
+Действия, выглядящие как деструктивные или необратимые (delete, send, apply, pay, checkout и т.д.), требуют подтверждения. Агент ставит задачу на паузу, пишет краткий план действия и ждёт POST /tasks/{id}/confirm из UI.
+
+## Управление контекстом и лимитами токенов
+
+- Snapshot структурированный: url, title, summary видимого текста, ограниченный список интерактивных элементов.
+- Краткосрочная память хранит последние шаги; старые шаги суммаризируются.
+- Факты хранятся отдельно для дальнейшего использования.
+- Полный DOM не отправляется в LLM.
+
+## Обработка ошибок
+
+- Лимит ретраев с переходом в reflector-режим.
+- Скриншот сохраняется при ошибках.
+- Прогресс-гард для обнаружения зацикливания и смены стратегии.
+
+## Провайдеры LLM и стоимость
+
+- По умолчанию: OpenAI-compatible API (платный; см. https://platform.openai.com/docs).
+- Опционально: Anthropic API (платный; см. https://docs.anthropic.com).
+- Опционально: Google AI Studio / Gemini API (цены и квоты зависят от аккаунта; см. https://ai.google.dev/gemini-api/docs).
+- Бесплатные варианты: используйте бесплатный OpenAI-compatible провайдер, если доступен, или локальную модель с OpenAI-compatible сервером (например, LM Studio, Ollama). Лимиты бесплатных тарифов меняются — проверяйте в документации провайдера.
+- Dry-run работает без ключа (агент завершит задачу с сообщением).
+
+## Документация и ссылки
+
+- OpenAI Chat Completions tool calling: https://platform.openai.com/docs
+- Anthropic Messages API: https://docs.anthropic.com
+- Playwright Python: https://playwright.dev/python
+
+## Использованные AI-инструменты
+
+Этот MVP был собран с помощью Codex CLI как ассистента разработчика. Промпты, архитектура и ревью проходили через ассистента и затем проверялись локально.
+
+## Компромиссы из-за 3-дневного дедлайна
+
+- Одновременно поддерживается только одна активная задача из-за общего persistent профиля браузера.
+- Эвристическое определение прогресса и security matching.
+- Минимальный UI и ограниченная обработка пользовательского ввода (confirm продолжает как подтверждения, так и ручные шаги).
+
+## Ограничения
+
+- Нет обхода капчи или 2FA; агент ставит задачу на паузу и ждёт ручного действия.
+- Поведение зависит от структуры страницы и качества LLM, возможна недетерминированность.
+- Список ключевых слов для безопасности ориентирован на английский (включает небольшой набор русских).
+- Точность извлечения данных зависит от LLM; проверяйте перед необратимыми действиями.
+
+## Улучшения дальше
+
+- Планировщик с изолированными профилями браузера для параллельных задач.
+- Более качественное ранжирование элементов и accessiblity-маппинг.
+- Структурированный ввод для форм и учётных данных (без хранения секретов).
+- Более надёжная обработка попапов и диалогов на разных сайтах.

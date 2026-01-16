@@ -1,0 +1,389 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Space+Grotesk:wght@400;600&display=swap");
+
+:root {
+  --bg: #f2f4f8;
+  --panel: #ffffff;
+  --ink: #121417;
+  --muted: #5c6470;
+  --accent: #2563eb;
+  --accent-dark: #1d4ed8;
+  --shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+}
+
+body {
+  font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+  margin: 0;
+  background: radial-gradient(circle at top, var(--panel) 0%, var(--bg) 55%);
+  color: var(--ink);
+}
+
+body[data-theme="dark"] {
+  --bg: #0b0f14;
+  --panel: #0f172a;
+  --ink: #e5e7eb;
+  --muted: #9aa4b2;
+  --accent: #38bdf8;
+  --accent-dark: #0ea5e9;
+  --shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+}
+
+.container {
+  max-width: 900px;
+  margin: 32px auto;
+  padding: 24px;
+  background: var(--panel);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  position: relative;
+}
+
+.hint {
+  color: var(--muted);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.title-block h1 {
+  margin: 0;
+}
+
+.icon-button {
+  border: none;
+  background: transparent;
+  padding: 6px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+.icon-button svg {
+  width: 22px;
+  height: 22px;
+  fill: var(--ink);
+}
+
+.icon-button:hover {
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.settings-panel {
+  position: absolute;
+  top: 62px;
+  right: 18px;
+  width: 320px;
+  background: var(--panel);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 16px;
+  display: none;
+  z-index: 10;
+}
+
+.settings-panel::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  right: 14px;
+  width: 14px;
+  height: 14px;
+  background: var(--panel);
+  border-left: 1px solid rgba(148, 163, 184, 0.35);
+  border-top: 1px solid rgba(148, 163, 184, 0.35);
+  transform: rotate(45deg);
+}
+
+.settings-panel.open {
+  display: block;
+}
+
+.settings-title {
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.settings-group {
+  margin-bottom: 14px;
+}
+
+.settings-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.theme-toggle {
+  display: flex;
+  gap: 8px;
+}
+
+.theme-btn {
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: transparent;
+  color: var(--ink);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.theme-btn.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: transparent;
+}
+
+.tabs {
+  display: flex;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+button.tab {
+  background: #e2e8f0;
+  color: #1f2937;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+button.tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.active {
+  display: block;
+}
+
+textarea {
+  width: 100%;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid #cbd5f5;
+  font-size: 14px;
+  font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.controls {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #cbd5f5;
+  transition: 0.2s;
+  border-radius: 999px;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background: #fff;
+  transition: 0.2s;
+  border-radius: 50%;
+}
+
+.switch input:checked + .slider {
+  background: var(--accent);
+}
+
+.switch input:checked + .slider:before {
+  transform: translateX(20px);
+}
+
+.toggle-text {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.tooltip {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid #94a3b8;
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  position: relative;
+  cursor: default;
+}
+
+.tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 130%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 10px 12px;
+  border-radius: 8px;
+  width: 260px;
+  font-size: 12px;
+  line-height: 1.4;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+}
+
+.tooltip:hover::after {
+  opacity: 1;
+  transform: translate(-50%, -6px);
+}
+
+button {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+
+button:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+
+button:not(:disabled):hover {
+  background: var(--accent-dark);
+  transform: translateY(-1px);
+}
+
+.provider-tabs {
+  display: flex;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+button.provider-tab {
+  background: #f1f5f9;
+  color: #1f2937;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+button.provider-tab.active {
+  background: var(--accent-dark);
+  color: #fff;
+}
+
+.provider-panel {
+  display: none;
+  margin-top: 12px;
+}
+
+.provider-panel.active {
+  display: block;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.field span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+input[type="text"],
+input[type="password"] {
+  width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #cbd5f5;
+  font-size: 14px;
+  font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+select {
+  width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #cbd5f5;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 14px;
+  font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+}
+
+.status {
+  margin-top: 12px;
+  font-weight: 600;
+}
+
+pre {
+  background: #0f172a;
+  color: #c9d1d9;
+  padding: 16px;
+  margin-top: 16px;
+  height: 340px;
+  overflow: auto;
+  border-radius: 6px;
+  font-family: "IBM Plex Mono", "Courier New", monospace;
+}
+
+pre.models-output {
+  height: 220px;
+  background: #0b1220;
+}
