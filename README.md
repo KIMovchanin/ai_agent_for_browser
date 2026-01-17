@@ -75,6 +75,8 @@ OPENAI_API_KEY=your_key_here
 OPENAI_MODEL=gpt-4.1-nano
 ```
 
+Note: GPT-5 family models require `max_completion_tokens` and may reject `temperature`; the provider layer auto-adjusts these parameters.
+
 Anthropic config:
 
 ```
@@ -136,6 +138,8 @@ Actions that look destructive or irreversible (delete, send, apply, pay, checkou
 ## Context + token constraints
 
 - Snapshot is structured: url, title, visible text summary, and limited interactive elements.
+- Visible text summary is capped (currently 2000 chars).
+- Interactive elements are capped (35 by default, 80 for mail/inbox pages).
 - Short-term memory stores recent steps; older steps are summarized.
 - Facts are stored separately for reuse in later reasoning.
 - No full DOM dumps are sent to the LLM.
@@ -259,6 +263,8 @@ OPENAI_API_KEY=your_key_here
 OPENAI_MODEL=gpt-4.1-nano
 ```
 
+Примечание: модели семейства GPT-5 требуют `max_completion_tokens` и могут отклонять `temperature`; слой провайдера подстраивает параметры автоматически.
+
 Anthropic конфиг:
 
 ```
@@ -320,6 +326,8 @@ php -S localhost:8000 -t web
 ## Управление контекстом и лимитами токенов
 
 - Snapshot структурированный: url, title, summary видимого текста, ограниченный список интерактивных элементов.
+- Summary видимого текста ограничен (сейчас 2000 символов).
+- Интерактивные элементы ограничены (35 по умолчанию, 80 для почты/входящих).
 - Краткосрочная память хранит последние шаги; старые шаги суммаризируются.
 - Факты хранятся отдельно для дальнейшего использования.
 - Полный DOM не отправляется в LLM.

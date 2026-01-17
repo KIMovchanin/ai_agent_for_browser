@@ -17,7 +17,7 @@ playwright/.cache/
 # Env files
 .env
 .env.*
-.env.example
+!.env.example
 
 # Logs and artifacts
 *.log

@@ -28,11 +28,18 @@
       <div id="settings-panel" class="settings-panel">
         <div class="settings-title" data-i18n="settings_title">Settings</div>
         <div class="settings-group">
-          <div class="settings-label" data-i18n="label_theme">Theme</div>
-          <div class="theme-toggle">
-            <button class="theme-btn" data-theme="light" data-i18n="theme_light">Light</button>
-            <button class="theme-btn" data-theme="dark" data-i18n="theme_dark">Dark</button>
-          </div>
+          <label class="field">
+            <span data-i18n="label_theme">Theme</span>
+            <select id="theme-select" class="theme-select">
+              <option value="light" data-i18n="theme_light">Light</option>
+              <option value="dark" data-i18n="theme_dark">Dark</option>
+              <option value="green" data-i18n="theme_green">Green</option>
+              <option value="red" data-i18n="theme_red">Red</option>
+              <option value="orange" data-i18n="theme_orange">Orange</option>
+              <option value="purple" data-i18n="theme_purple">Purple</option>
+              <option value="blue" data-i18n="theme_blue">Blue</option>
+            </select>
+          </label>
         </div>
         <div class="settings-group">
           <label class="field">

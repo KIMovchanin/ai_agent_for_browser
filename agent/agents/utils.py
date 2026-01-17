@@ -91,6 +91,13 @@ def extract_goal_query(goal: str) -> str:
     goal = goal.strip()
     if not goal:
         return ""
+    url_match = re.search(
+        r"(?:url|link|website|site|\u0441\u0441\u044b\u043b\u043a\u0430|\u0430\u0434\u0440\u0435\u0441|\u0434\u043e\u043c\u0435\u043d)\s+(?:na|for|to|\u043d\u0430|\u0434\u043b\u044f)?\s*([^\n\.,;!?]+)",
+        goal,
+        re.IGNORECASE,
+    )
+    if url_match:
+        return _clean_query(url_match.group(1))
     explicit_match = re.search(r"\b(?:про|about)\b\s+([^\n\.,;!?]+)", goal, re.IGNORECASE)
     if explicit_match:
         return _clean_query(explicit_match.group(1))
@@ -164,18 +171,20 @@ def _compact_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     if not snapshot:
         return {}
     visible_text = snapshot.get("visible_text_summary") or ""
-    if isinstance(visible_text, str) and len(visible_text) > 10000:
-        visible_text = visible_text[:10000] + "..."
+    if isinstance(visible_text, str) and len(visible_text) > 2000:
+        visible_text = visible_text[:2000] + "..."
     elements = snapshot.get("interactive_elements") or []
     compact_elements = []
-    for element in elements[:40]:
+    url = (snapshot.get("url") or "").lower()
+    limit = 80 if any(token in url for token in ["mail.", "inbox", "mail/"]) else 35
+    for element in elements[:limit]:
         compact_elements.append(
             {
                 "id": element.get("id"),
                 "role": element.get("role"),
-                "name": (element.get("name") or "")[:160],
-                "text": (element.get("text") or "")[:160],
-                "aria_label": (element.get("aria_label") or "")[:160],
+                "name": (element.get("name") or "")[:120],
+                "text": (element.get("text") or "")[:120],
+                "aria_label": (element.get("aria_label") or "")[:120],
                 "bbox": element.get("bbox"),
             }
         )

@@ -66,6 +66,14 @@ class TaskManager:
         browser_channel: Optional[str] = None,
     ) -> Task:
         with self.lock:
+            for task in self.tasks.values():
+                if task.session and task.session.stop_requested and task.status in {
+                    "queued",
+                    "running",
+                    "waiting_confirm",
+                    "waiting_user",
+                }:
+                    task.status = "stopped"
             if any(
                 task.status in {"queued", "running", "waiting_confirm", "waiting_user"}
                 for task in self.tasks.values()
@@ -169,6 +177,9 @@ class TaskManager:
 
     def _process_task(self, task: Task) -> None:
         try:
+            if task.status == "stopped":
+                self._emit(task, "status", {"status": task.status})
+                return
             task.status = "running"
             task.updated_at = time.time()
             self.logger.info(
@@ -211,15 +222,15 @@ class TaskManager:
                 task.session.run()
                 task.updated_at = time.time()
 
-                if task.session.done:
+                if task.session.stop_requested:
+                    task.status = "stopped"
+                elif task.session.done:
                     task.status = "done"
                     task.result = task.session.result
                 elif task.session.waiting_confirm:
                     task.status = "waiting_confirm"
                 elif task.session.waiting_user:
                     task.status = "waiting_user"
-                elif task.session.stop_requested:
-                    task.status = "stopped"
                 else:
                     task.status = "running"
             else:
@@ -410,6 +421,10 @@ class TaskManager:
             "upload",
             "book",
             "reserve",
+            "url",
+            "link",
+            "website",
+            "site",
             "\u043e\u0442\u043a\u0440\u043e\u0439",
             "\u043f\u0435\u0440\u0435\u0439\u0434\u0438",
             "\u0437\u0430\u0439\u0434\u0438",
@@ -427,6 +442,10 @@ class TaskManager:
             "\u043e\u0442\u043a\u043b\u0438\u043a",
             "\u0441\u043a\u0430\u0447",
             "\u0437\u0430\u0433\u0440\u0443\u0437",
+            "\u0441\u0441\u044b\u043b\u043a",
+            "\u0430\u0434\u0440\u0435\u0441",
+            "\u0441\u0430\u0439\u0442",
+            "\u0434\u043e\u043c\u0435\u043d",
         ]
         return any(token in text for token in actions)
 
@@ -519,6 +538,22 @@ class TaskManager:
         self.worker_profile_dir = desired_profile
         self.logger.info("Created worker controller profile=%s", desired_profile)
         return self.worker_controller
+
+    def shutdown(self) -> None:
+        with self.lock:
+            for task in self.tasks.values():
+                if task.session:
+                    try:
+                        task.session.force_stop("Server shutdown.")
+                    except Exception:
+                        pass
+            if self.worker_controller:
+                try:
+                    self.worker_controller.close()
+                except Exception:
+                    pass
+                self.worker_controller = None
+                self.worker_profile_dir = None
 
     def _settings_for_task(self, task: Task) -> Settings:
         settings = self.settings

@@ -44,8 +44,8 @@ class OpenAIProvider(BaseLLM):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        use_completion_tokens = False
-        omit_temperature = False
+        use_completion_tokens = self._model_prefers_completion_tokens()
+        omit_temperature = self._model_blocks_temperature()
         for attempt in range(self.max_retries + 1):
             try:
                 payload: Dict[str, Any] = {
@@ -105,3 +105,15 @@ class OpenAIProvider(BaseLLM):
                     raise LLMError(str(exc)) from exc
 
         raise LLMError("OpenAI request failed")
+
+    def _model_prefers_completion_tokens(self) -> bool:
+        model = (self.model or "").lower()
+        if model.startswith("gpt-5"):
+            return True
+        return False
+
+    def _model_blocks_temperature(self) -> bool:
+        model = (self.model or "").lower()
+        if model.startswith("gpt-5"):
+            return True
+        return False

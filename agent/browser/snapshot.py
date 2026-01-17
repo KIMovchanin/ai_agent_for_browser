@@ -8,8 +8,10 @@ from playwright.sync_api import Page
 
 INTERACTIVE_SELECTORS = (
     "a, button, input, textarea, select, option, "
+    "input[type='checkbox'], input[type='radio'], "
     "[role='button'], [role='link'], [role='textbox'], [role='menuitem'], "
-    "[role='option'], [contenteditable='true']"
+    "[role='option'], [role='checkbox'], [role='row'], [role='listitem'], "
+    "[contenteditable='true']"
 )
 
 
@@ -24,12 +26,14 @@ def _safe_text(text: str, max_chars: int) -> str:
     return text
 
 
-def _infer_role(tag: str) -> str:
+def _infer_role(tag: str, input_type: str) -> str:
     if tag == "a":
         return "link"
     if tag == "button":
         return "button"
     if tag in {"input", "textarea", "select"}:
+        if input_type in {"checkbox", "radio"}:
+            return input_type
         return "input"
     return "generic"
 
@@ -41,7 +45,7 @@ def _element_name(text: str, aria_label: str, placeholder: str, name_attr: str) 
     return ""
 
 
-def build_snapshot(page: Page, max_elements: int = 80, max_text_chars: int = 10000) -> Dict[str, Any]:
+def build_snapshot(page: Page, max_elements: int = 120, max_text_chars: int = 2000) -> Dict[str, Any]:
     visible_text = ""
     try:
         visible_text = page.evaluate(
@@ -67,6 +71,12 @@ def build_snapshot(page: Page, max_elements: int = 80, max_text_chars: int = 100
                 continue
 
             tag = (handle.evaluate("e => e.tagName.toLowerCase()") or "").strip()
+            input_type = ""
+            if tag == "input":
+                try:
+                    input_type = (handle.get_attribute("type") or "").lower()
+                except Exception:
+                    input_type = ""
             text = ""
             try:
                 text = handle.inner_text() or ""
@@ -76,15 +86,15 @@ def build_snapshot(page: Page, max_elements: int = 80, max_text_chars: int = 100
             aria_label = handle.get_attribute("aria-label") or ""
             placeholder = handle.get_attribute("placeholder") or ""
             name_attr = handle.get_attribute("name") or ""
-            role = handle.get_attribute("role") or _infer_role(tag)
+            role = handle.get_attribute("role") or _infer_role(tag, input_type)
             name = _element_name(text, aria_label, placeholder, name_attr)
 
             elements.append(
                 {
                     "role": role,
-                    "name": _safe_text(name, 160),
-                    "aria_label": _safe_text(aria_label, 160),
-                    "text": _safe_text(text, 160),
+                    "name": _safe_text(name, 120),
+                    "aria_label": _safe_text(aria_label, 120),
+                    "text": _safe_text(text, 120),
                     "bbox": {
                         "x": int(box["x"]),
                         "y": int(box["y"]),

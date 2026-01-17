@@ -122,6 +122,15 @@ class Navigator:
                     ),
                     "Fallback: click a result matching the query.",
                 )
+            element = Navigator._pick_result_link(snapshot, exclude_id=None)
+            if element and element.get("id"):
+                return (
+                    ToolCall(
+                        name="click",
+                        arguments={"element_id": element["id"]},
+                    ),
+                    "Fallback: click a top search result.",
+                )
 
         element = Navigator._pick_search_input(snapshot)
         if element and element.get("id"):
@@ -190,6 +199,66 @@ class Navigator:
             if any(keyword in label for keyword in keywords):
                 return element
         return None
+
+    @staticmethod
+    def _pick_result_link(
+        snapshot: Dict[str, Any],
+        exclude_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        elements = snapshot.get("interactive_elements", []) or []
+        banned = (
+            "images",
+            "videos",
+            "news",
+            "maps",
+            "settings",
+            "tools",
+            "translate",
+            "about",
+            "privacy",
+            "terms",
+            "cache",
+            "google",
+            "duckduckgo",
+            "bing",
+            "\u043a\u0430\u0440\u0442\u0438\u043d",
+            "\u0432\u0438\u0434\u0435\u043e",
+            "\u043d\u043e\u0432\u043e\u0441\u0442",
+            "\u043a\u0430\u0440\u0442\u044b",
+            "\u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a",
+            "\u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442",
+            "\u043e \u043d\u0430\u0441",
+            "\u043f\u043e\u043b\u0438\u0442\u0438\u043a",
+            "\u0432\u043e\u0439\u0442\u0438",
+        )
+        candidates = []
+        for element in elements:
+            if exclude_id and str(element.get("id")) == str(exclude_id):
+                continue
+            role = (element.get("role") or "").lower()
+            if role not in {"link", "button"}:
+                continue
+            text = " ".join(
+                [
+                    element.get("name") or "",
+                    element.get("aria_label") or "",
+                    element.get("text") or "",
+                ]
+            ).strip()
+            if len(text) < 4:
+                continue
+            lowered = text.lower()
+            if any(word in lowered for word in banned):
+                continue
+            bbox = element.get("bbox") or {}
+            y = int(bbox.get("y", 0))
+            if y < 120:
+                continue
+            candidates.append((y, -len(text), element))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        return candidates[0][2]
 
     @staticmethod
     def _is_search_context(snapshot: Dict[str, Any], goal_text: str) -> bool:

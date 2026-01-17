@@ -54,6 +54,11 @@ class AgentSession:
         self.goal_urls = extract_goal_urls(goal)
         self.visited_goal_urls: set[str] = set()
         self.goal_url_ordered = should_enforce_goal_order(goal) and len(self.goal_urls) > 1
+        self.target_count = self._extract_target_count(goal)
+        self.mail_task = self._looks_like_mail_goal(goal)
+        self.destructive_requested = self._goal_needs_deletion(goal)
+        self.destructive_done = False
+        self.delete_policy: Optional[str] = None
         self.llm_calls = 0
         self.token_usage = {"prompt": 0, "completion": 0, "total": 0}
         self.next_usage_log = 5000
@@ -85,6 +90,8 @@ class AgentSession:
         self.loading_waits = 0
         self.user_choice_by_category: Dict[str, str] = {}
         self.auto_user_replies = 0
+        self.failure_streak = 0
+        self.last_failure_ts = 0.0
 
         self.pending_action: Optional[PendingAction] = None
         self.waiting_confirm = False
@@ -109,6 +116,8 @@ class AgentSession:
         self.stop_requested = True
         self.waiting_confirm = False
         self.waiting_user = False
+        self.pending_action = None
+        self.confirmed = False
         self._emit(
             "log",
             {
@@ -136,8 +145,12 @@ class AgentSession:
             return
         category = self._question_category(self.user_question or "")
         numeric = self._extract_numeric_choice(cleaned)
-        if category and numeric:
-            self.user_choice_by_category[category] = numeric
+        if category:
+            self.user_choice_by_category[category] = numeric or cleaned
+        if category == "delete":
+            self.delete_policy = self._interpret_delete_policy(cleaned)
+            if self.delete_policy == "list_only":
+                self.destructive_requested = False
         if self._should_stop_reply(cleaned):
             self.request_stop()
         record = StepRecord(
@@ -183,6 +196,10 @@ class AgentSession:
 
         self._emit("status", {"status": "running"})
 
+        if self.stop_requested:
+            self._emit("status", {"status": "stopped"})
+            self._close()
+            return
         if self.pending_action and self.confirmed:
             self._execute_tool(self.pending_action.tool_call, self.pending_action.reason, self.pending_action.snapshot)
             self.pending_action = None
@@ -247,6 +264,10 @@ class AgentSession:
                 list(self.visited_goal_urls),
             )
             decision_ms = int((time.perf_counter() - decision_start) * 1000)
+            if self.stop_requested:
+                self._emit("status", {"status": "stopped"})
+                self._close()
+                return
             if not tool_call:
                 self.error_count += 1
                 self._emit(
@@ -263,6 +284,8 @@ class AgentSession:
                 )
                 if self.error_count > self.settings.max_retries:
                     self._pause_for_user("Unable to choose next action. Please assist.")
+                    return
+                if self._record_failure(reason or "No tool call"):
                     return
                 context = build_context(
                     self.goal,
@@ -317,9 +340,19 @@ class AgentSession:
                 self._pause_for_user(question)
                 return
             if tool_call.name == "finish":
-                result = tool_call.arguments.get("result") or "Task completed."
-                self._finish(result)
-                return
+                if self._should_block_finish():
+                    if self.delete_policy == "list_only":
+                        pass
+                    elif self.delete_policy == "allow":
+                        tool_call = ToolCall(name="snapshot", arguments={})
+                        reason = "Continue after delete confirmation."
+                    else:
+                        self._pause_for_user(self._delete_confirmation_question())
+                        return
+                if tool_call.name == "finish":
+                    result = tool_call.arguments.get("result") or "Task completed."
+                    self._finish(result)
+                    return
             if tool_call.name == "stop_task":
                 self.request_stop()
                 self._emit("status", {"status": "stopped"})
@@ -345,13 +378,34 @@ class AgentSession:
                 )
                 return
 
+            if self.stop_requested:
+                self._emit("status", {"status": "stopped"})
+                self._close()
+                return
             self._execute_tool(tool_call, reason, snapshot)
+            if self.stop_requested:
+                self._emit("status", {"status": "stopped"})
+                self._close()
+                return
             if self.done or self.waiting_confirm or self.waiting_user:
                 return
 
         self._finish("Max steps reached without completion.")
 
     def _execute_tool(self, tool_call: ToolCall, reason: str, snapshot: Dict[str, Any]) -> None:
+        if self.stop_requested:
+            self._emit(
+                "log",
+                {
+                    "step": self.step,
+                    "tool": tool_call.name,
+                    "reason": "Skip tool: stop requested.",
+                    "url": self.last_url,
+                    "title": self.last_title,
+                    "status": "warning",
+                },
+            )
+            return
         self.step += 1
         status = "ok"
         error = None
@@ -374,10 +428,19 @@ class AgentSession:
             status = "error"
             error = str(exc)
             self.error_count += 1
+            self._record_failure(error)
             try:
                 self.tool_executor.execute("take_screenshot", {"label": "error"})
             except Exception:
                 pass
+        else:
+            self._reset_failure_streak()
+            if status == "ok":
+                needs_confirm, _ = self.security.needs_confirmation(
+                    tool_call.name, tool_call.arguments or {}, snapshot
+                )
+                if needs_confirm:
+                    self.destructive_done = True
 
         if output is not None:
             try:
@@ -586,11 +649,27 @@ class AgentSession:
                 "tool": "user_input",
                 "reason": "Auto-reply using previous choice.",
                 "status": "warning",
-                "output": stored,
+                "output": str(stored)[:120],
             },
         )
-        self.provide_user_input(stored)
+        self.provide_user_input(str(stored))
         return True
+
+    def _record_failure(self, reason: str) -> bool:
+        now = time.perf_counter()
+        if now - self.last_failure_ts <= 1.0:
+            self.failure_streak += 1
+        else:
+            self.failure_streak = 1
+        self.last_failure_ts = now
+        if self.failure_streak >= 5:
+            self.force_stop("Too many failed attempts in a short time. Stopping.")
+            self._emit("status", {"status": "stopped"})
+            return True
+        return False
+
+    def _reset_failure_streak(self) -> None:
+        self.failure_streak = 0
 
     def _detect_loop(self, tool_call: ToolCall, snapshot: Dict[str, Any]) -> Optional[str]:
         if tool_call.name != "navigate":
@@ -757,6 +836,9 @@ class AgentSession:
         return self.search_engine_url or "https://www.google.com"
 
     def _pause_for_user(self, question: str) -> None:
+        if self.stop_requested:
+            self._emit("status", {"status": "stopped"})
+            return
         question = self._format_user_question(question)
         self.waiting_user = True
         self.user_question = question
@@ -917,6 +999,44 @@ class AgentSession:
         snapshot: Dict[str, Any],
     ) -> Optional[tuple[ToolCall, str]]:
         current_url = (snapshot.get("url") or "").strip()
+        if tool_call.name == "click":
+            target_text = ""
+            try:
+                element = self.controller.resolve_element(
+                    element_id=tool_call.arguments.get("element_id"),
+                    strategy=tool_call.arguments.get("click_strategy"),
+                )
+                target_text = " ".join(
+                    [
+                        element.get("name") or "",
+                        element.get("aria_label") or "",
+                        element.get("text") or "",
+                    ]
+                )
+            except Exception:
+                target_text = ""
+            if self._should_avoid_select_all(target_text):
+                candidate = self._pick_non_ad_element(snapshot, exclude_id=tool_call.arguments.get("element_id"))
+                if candidate:
+                    return (
+                        ToolCall(name="click", arguments={"element_id": candidate["id"]}),
+                        "Avoid select-all; clicking a single item instead.",
+                    )
+                return (
+                    ToolCall(name="ask_user", arguments={"question": "Detected select-all, but the task needs only the last N items. How should I proceed?"}),
+                    "Blocked select-all for limited-count task.",
+                )
+            if self._is_ad_target(target_text) and not self._goal_allows_ads():
+                candidate = self._pick_non_ad_element(snapshot, exclude_id=tool_call.arguments.get("element_id"))
+                if candidate:
+                    return (
+                        ToolCall(name="click", arguments={"element_id": candidate["id"]}),
+                        "Skipping ad/sponsored link; choosing a different item.",
+                    )
+                return (
+                    ToolCall(name="ask_user", arguments={"question": "Detected an ad/sponsored link. Should I skip it and try another item?"}),
+                    "Blocked ad/sponsored click.",
+                )
         if self.no_progress_steps >= self.settings.no_progress_limit and tool_call.name in {"scroll", "click", "type"}:
             last_record = self.memory.steps[-1] if self.memory.steps else None
             if (
@@ -924,6 +1044,17 @@ class AgentSession:
                 and last_record.tool == tool_call.name
                 and (last_record.args or {}) == (tool_call.arguments or {})
             ):
+                if tool_call.name == "click" and self._is_search_results(current_url):
+                    exclude_id = (last_record.args or {}).get("element_id")
+                    candidate = self._pick_search_result(snapshot, exclude_id)
+                    if candidate:
+                        return (
+                            ToolCall(
+                                name="click",
+                                arguments={"element_id": candidate["id"]},
+                            ),
+                            "Progress guard: clicking a different search result.",
+                        )
                 return (
                     ToolCall(
                         name="ask_user",
@@ -947,6 +1078,17 @@ class AgentSession:
                     and last_record.tool == fallback_call.name
                     and (last_record.args or {}) == (fallback_call.arguments or {})
                 ):
+                    if fallback_call.name == "click" and self._is_search_results(current_url):
+                        exclude_id = (last_record.args or {}).get("element_id")
+                        candidate = self._pick_search_result(snapshot, exclude_id)
+                        if candidate:
+                            return (
+                                ToolCall(
+                                    name="click",
+                                    arguments={"element_id": candidate["id"]},
+                                ),
+                                "Progress guard: clicking a different search result.",
+                            )
                     return (
                         ToolCall(
                             name="ask_user",
@@ -1047,6 +1189,217 @@ class AgentSession:
                 )
                 return fallback_call, fallback_reason
         return None
+
+    @staticmethod
+    def _extract_target_count(goal: str) -> Optional[int]:
+        text = (goal or "").lower()
+        patterns = [
+            r"(?:last|последн(?:ие|их))\s+(\d{1,3})",
+            r"\b(\d{1,3})\s+(?:emails|messages|letters|mails|писем|сообщений|письма)\b",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                try:
+                    value = int(match.group(1))
+                except ValueError:
+                    continue
+                if 1 <= value <= 200:
+                    return value
+        return None
+
+    @staticmethod
+    def _looks_like_mail_goal(goal: str) -> bool:
+        text = (goal or "").lower()
+        markers = [
+            "mail",
+            "email",
+            "inbox",
+            "\u043f\u043e\u0447\u0442",
+            "\u043f\u0438\u0441\u044c\u043c",
+        ]
+        return any(marker in text for marker in markers)
+
+    def _should_avoid_select_all(self, target_text: str) -> bool:
+        if not target_text or not self.target_count:
+            return False
+        lowered = target_text.lower()
+        patterns = [
+            r"\bselect all\b",
+            r"\bselect all messages\b",
+            r"\bselect all conversations\b",
+            r"\u0432\u044b\u0431\u0440\u0430\u0442\u044c \u0432\u0441\u0435",
+            r"\u0432\u044b\u0434\u0435\u043b\u0438\u0442\u044c \u0432\u0441\u0435",
+            r"\u0432\u0441\u0435 \u043f\u0438\u0441\u044c\u043c\u0430",
+        ]
+        if any(re.search(pattern, lowered) for pattern in patterns):
+            return True
+        return False
+
+    def _should_block_finish(self) -> bool:
+        if not self.destructive_requested:
+            return False
+        if self.destructive_done:
+            return False
+        return True
+
+    def _delete_confirmation_question(self) -> str:
+        count = self.target_count or 10
+        return (
+            "Вы просили удалить спам. Нужно подтверждение перед удалением.\n"
+            f"Как действовать с последними {count} письмами?\n"
+            "1) Удалять/помечать как спам только явную рекламу.\n"
+            "2) Ничего не удалять — только показать список.\n"
+            "3) Остановить задачу."
+        )
+
+    @staticmethod
+    def _interpret_delete_policy(text: str) -> Optional[str]:
+        normalized = (text or "").lower()
+        if normalized.isdigit():
+            if normalized == "1":
+                return "allow"
+            if normalized == "2":
+                return "list_only"
+            if normalized == "3":
+                return "stop"
+        if re.search(r"\bне удал|\bне надо удал|\bтолько список|\bпоказать", normalized):
+            return "list_only"
+        if re.search(r"\bудал|\bспам|\bреклам", normalized):
+            return "allow"
+        return None
+
+    @staticmethod
+    def _goal_needs_deletion(goal: str) -> bool:
+        lowered = (goal or "").lower()
+        return bool(re.search(r"\bdelete\b|\bremove\b|\bspam\b|\btrash\b|\bdelete\b|"
+                              r"\u0443\u0434\u0430\u043b|\u0441\u043f\u0430\u043c", lowered))
+
+    @staticmethod
+    def _is_ad_target(text: str) -> bool:
+        if not text:
+            return False
+        lowered = text.lower()
+        patterns = [
+            r"\bads?\b",
+            r"\badvert\b",
+            r"\badvertisement\b",
+            r"\bsponsored\b",
+            r"\bpromoted\b",
+            r"\bpromo\b",
+            r"\b\u0440\u0435\u043a\u043b\u0430\u043c",
+            r"\b\u0441\u043f\u043e\u043d\u0441\u043e\u0440",
+        ]
+        return any(re.search(pattern, lowered) for pattern in patterns)
+
+    def _goal_allows_ads(self) -> bool:
+        text = (self.goal or "").lower()
+        return bool(re.search(r"\bads?\b|\badvert|\bsponsor|\bpromo|\u0440\u0435\u043a\u043b\u0430\u043c|\u0441\u043f\u043e\u043d\u0441\u043e\u0440", text))
+
+    def _pick_non_ad_element(
+        self,
+        snapshot: Dict[str, Any],
+        exclude_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        elements = snapshot.get("interactive_elements", []) or []
+        candidates = []
+        for element in elements:
+            if exclude_id and str(element.get("id")) == str(exclude_id):
+                continue
+            role = (element.get("role") or "").lower()
+            if role not in {"link", "button", "checkbox", "row", "listitem", "input"}:
+                continue
+            text = " ".join(
+                [
+                    element.get("name") or "",
+                    element.get("aria_label") or "",
+                    element.get("text") or "",
+                ]
+            ).strip()
+            if not text:
+                continue
+            lowered = text.lower()
+            if self._is_ad_target(lowered):
+                continue
+            if self._should_avoid_select_all(lowered):
+                continue
+            if re.search(r"\babout\b|privacy|terms|cookies|about us|\u043e \u043d\u0430\u0441|\u043f\u043e\u043b\u0438\u0442\u0438\u043a", lowered):
+                continue
+            bbox = element.get("bbox") or {}
+            y = int(bbox.get("y", 0))
+            if y < 120:
+                continue
+            candidates.append((y, -len(text), element))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        return candidates[0][2]
+
+    @staticmethod
+    def _is_search_results(url: str) -> bool:
+        if not url:
+            return False
+        lowered = url.lower()
+        if "q=" not in lowered and "search=" not in lowered and "query=" not in lowered:
+            return False
+        return any(host in lowered for host in ["google.", "bing.", "duckduckgo.", "yandex."])
+
+    @staticmethod
+    def _pick_search_result(snapshot: Dict[str, Any], exclude_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        elements = snapshot.get("interactive_elements", []) or []
+        banned = (
+            "images",
+            "videos",
+            "news",
+            "maps",
+            "settings",
+            "tools",
+            "translate",
+            "about",
+            "privacy",
+            "terms",
+            "cache",
+            "google",
+            "duckduckgo",
+            "bing",
+            "\u043a\u0430\u0440\u0442\u0438\u043d",
+            "\u0432\u0438\u0434\u0435\u043e",
+            "\u043d\u043e\u0432\u043e\u0441\u0442",
+            "\u043a\u0430\u0440\u0442\u044b",
+            "\u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a",
+            "\u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442",
+            "\u043e \u043d\u0430\u0441",
+            "\u043f\u043e\u043b\u0438\u0442\u0438\u043a",
+            "\u0432\u043e\u0439\u0442\u0438",
+        )
+        candidates = []
+        for element in elements:
+            if exclude_id and str(element.get("id")) == str(exclude_id):
+                continue
+            role = (element.get("role") or "").lower()
+            if role not in {"link", "button"}:
+                continue
+            text = " ".join(
+                [
+                    element.get("name") or "",
+                    element.get("aria_label") or "",
+                    element.get("text") or "",
+                ]
+            ).strip()
+            if len(text) < 4:
+                continue
+            lowered = text.lower()
+            if any(word in lowered for word in banned):
+                continue
+            bbox = element.get("bbox") or {}
+            y = int(bbox.get("y", 0))
+            if y < 120:
+                continue
+            candidates.append((y, -len(text), element))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        return candidates[0][2]
 
     @staticmethod
     def _is_search_home(url: str) -> bool:

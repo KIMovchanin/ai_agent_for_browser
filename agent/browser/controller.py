@@ -10,7 +10,7 @@ try:
 except ImportError:  # pragma: no cover - non-Windows
     winreg = None
 
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 from ..config import Settings
 from .snapshot import build_snapshot
@@ -161,7 +161,36 @@ class BrowserController:
             raise ValueError("Missing bbox for element")
         x = bbox["x"] + max(1, bbox["width"] // 2)
         y = bbox["y"] + max(1, bbox["height"] // 2)
-        self.page.mouse.click(x, y)
+        before_pages = [page for page in self.context.pages if not page.is_closed()]
+        before_count = len(before_pages)
+        new_page = None
+        try:
+            with self.page.expect_popup(timeout=1000) as popup:
+                self.page.mouse.click(x, y)
+            new_page = popup.value
+        except PlaywrightTimeoutError:
+            pass
+        except Exception:
+            self.page.mouse.click(x, y)
+        try:
+            self.page.wait_for_load_state("domcontentloaded", timeout=5000)
+        except Exception:
+            pass
+        if new_page and not new_page.is_closed():
+            self.page = new_page
+            try:
+                self.page.bring_to_front()
+                self.page.wait_for_load_state("domcontentloaded", timeout=5000)
+            except Exception:
+                pass
+            return
+        after_pages = [page for page in self.context.pages if not page.is_closed()]
+        if len(after_pages) > before_count and after_pages[-1] is not self.page:
+            self.page = after_pages[-1]
+            try:
+                self.page.bring_to_front()
+            except Exception:
+                pass
 
     def type(self, element: Dict[str, Any], text: str, press_enter: bool = False) -> None:
         self.click(element)

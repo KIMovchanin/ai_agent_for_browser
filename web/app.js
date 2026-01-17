@@ -13,7 +13,7 @@ const modelEl = document.getElementById('model-select');
 const safeModeEl = document.getElementById('safe-mode');
 const settingsButton = document.getElementById('settings-button');
 const settingsPanel = document.getElementById('settings-panel');
-const themeButtons = document.querySelectorAll('.theme-btn');
+const themeSelect = document.getElementById('theme-select');
 const langToggle = document.getElementById('lang-toggle');
 const langSpans = langToggle ? langToggle.querySelectorAll('[data-lang]') : [];
 const userReplyWrap = document.getElementById('user-reply');
@@ -53,10 +53,27 @@ let eventSource = null;
 let taskId = null;
 let currentLang = 'ru';
 let waitingForUserInput = false;
+let eventStreamErrored = false;
 
 const MODEL_OPTIONS = {
-  gemini: ['gemini-2.0-flash-lite', 'gemini-2.5-flash-lite'],
-  openai: ['gpt-4.1-nano', 'gpt-4.1-mini', 'gpt-4.1', 'gpt-5-mini', 'gpt-5.1', 'gpt-5.2'],
+  gemini: [
+    'gemini-2.0-flash-lite',
+    'gemini-2.5-flash-lite',
+    'gemini-flash-latest',
+    'gemini-flash-lite-latest',
+    'gemini-pro-latest',
+  ],
+  openai: [
+    'gpt-3.5-turbo',
+    'gpt-4o-mini',
+    'gpt-4.1-nano',
+    'gpt-4.1-mini',
+    'gpt-4.1',
+    'gpt-5-mini',
+    'gpt-5',
+    'gpt-5.1',
+    'gpt-5.2',
+  ],
   ollama: ['qwen3:1.7b', 'functiongemma:latest'],
   anthropic: ['claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest'],
 };
@@ -69,6 +86,11 @@ const I18N = {
     label_theme: 'Theme',
     theme_light: 'Light',
     theme_dark: 'Dark',
+    theme_green: 'Green',
+    theme_red: 'Red',
+    theme_orange: 'Orange',
+    theme_purple: 'Purple',
+    theme_blue: 'Blue',
     label_search_engine: 'Search engine',
     label_provider: 'LLM provider',
     label_model: 'Model',
@@ -155,6 +177,11 @@ const I18N = {
     label_theme: '\u0422\u0435\u043c\u0430',
     theme_light: '\u0421\u0432\u0435\u0442\u043b\u0430\u044f',
     theme_dark: '\u0422\u0435\u043c\u043d\u0430\u044f',
+    theme_green: '\u0417\u0435\u043b\u0451\u043d\u044b\u0439',
+    theme_red: '\u041a\u0440\u0430\u0441\u043d\u044b\u0439',
+    theme_orange: '\u041e\u0440\u0430\u043d\u0436\u0435\u0432\u044b\u0439',
+    theme_purple: '\u0424\u0438\u043e\u043b\u0435\u0442\u043e\u0432\u044b\u0439',
+    theme_blue: '\u0421\u0438\u043d\u0438\u0439',
     label_search_engine: '\u041f\u043e\u0438\u0441\u043a\u043e\u0432\u0438\u043a',
     label_provider: '\u041f\u0440\u043e\u0432\u0430\u0439\u0434\u0435\u0440 LLM',
     label_model: '\u041c\u043e\u0434\u0435\u043b\u044c',
@@ -389,15 +416,13 @@ function resetUI() {
 }
 
 function applyTheme(theme) {
-  if (theme === 'dark') {
-    document.body.dataset.theme = 'dark';
-  } else {
-    document.body.dataset.theme = 'light';
+  const available = ['light', 'dark', 'green', 'red', 'orange', 'purple', 'blue'];
+  const chosen = available.includes(theme) ? theme : 'light';
+  document.body.dataset.theme = chosen;
+  if (themeSelect) {
+    themeSelect.value = chosen;
   }
-  themeButtons.forEach((button) => {
-    button.classList.toggle('active', button.dataset.theme === theme);
-  });
-  localStorage.setItem('ui_theme', theme);
+  localStorage.setItem('ui_theme', chosen);
 }
 
 function loadSettings() {
@@ -463,11 +488,11 @@ function setModelOptions(provider) {
 }
 
 function bindSettings() {
-  themeButtons.forEach((button) => {
-    button.addEventListener('click', () => {
-      applyTheme(button.dataset.theme);
+  if (themeSelect) {
+    themeSelect.addEventListener('change', () => {
+      applyTheme(themeSelect.value);
     });
-  });
+  }
 
   if (searchEngineEl) {
     searchEngineEl.addEventListener('change', () => {
@@ -550,6 +575,25 @@ function bindSettings() {
   }
 }
 
+function bindShortcuts() {
+  if (promptEl) {
+    promptEl.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        runBtn.click();
+      }
+    });
+  }
+  if (userReplyInput) {
+    userReplyInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        confirmBtn.click();
+      }
+    });
+  }
+}
+
 function setActiveTab(tabId) {
   tabs.forEach((tab) => {
     tab.classList.toggle('active', tab.dataset.tab === tabId);
@@ -613,6 +657,7 @@ function connectEvents(id) {
   if (eventSource) {
     eventSource.close();
   }
+  eventStreamErrored = false;
   eventSource = new EventSource(`${API_BASE}/tasks/${id}/events`);
   eventSource.addEventListener('log', (event) => {
     const payload = JSON.parse(event.data);
@@ -679,6 +724,8 @@ function connectEvents(id) {
     }
   });
   eventSource.onerror = () => {
+    if (eventStreamErrored) return;
+    eventStreamErrored = true;
     appendLog(t('log_event_error'));
   };
 }
@@ -758,7 +805,26 @@ stopBtn.addEventListener('click', async () => {
   if (!taskId) return;
   stopBtn.disabled = true;
   setStatus('Stopping...');
-  await fetch(`${API_BASE}/tasks/${taskId}/stop`, { method: 'POST' });
+  try {
+    const response = await fetch(`${API_BASE}/tasks/${taskId}/stop`, { method: 'POST' });
+    if (!response.ok) {
+      const detail = await response.text();
+      appendLog(`Stop failed: ${detail || response.statusText}`);
+      stopBtn.disabled = false;
+      return;
+    }
+    if (eventSource) {
+      eventSource.close();
+    }
+    setStatus(`${t('status_prefix')} ${t('status_stopped')}`);
+    confirmBtn.disabled = true;
+    stopBtn.disabled = true;
+    runBtn.disabled = false;
+    waitingForUserInput = false;
+  } catch (err) {
+    appendLog(`Stop failed: ${err.message || err}`);
+    stopBtn.disabled = false;
+  }
 });
 
 tabs.forEach((tab) => {
@@ -783,4 +849,5 @@ setActiveTab('agent');
 setActiveProvider('openai');
 loadSettings();
 bindSettings();
+bindShortcuts();
 resetUI();

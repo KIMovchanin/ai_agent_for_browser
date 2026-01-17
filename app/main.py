@@ -68,6 +68,14 @@ def _log_startup() -> None:
         settings.browser_user_data_dir,
     )
 
+
+@app.on_event("shutdown")
+def _shutdown() -> None:
+    try:
+        manager.shutdown()
+    except Exception:
+        pass
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:8000", "http://127.0.0.1:8000"],
