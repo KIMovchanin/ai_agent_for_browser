@@ -72,7 +72,45 @@
               <span class="slider"></span>
             </label>
             <span class="toggle-text" data-i18n="label_safe_mode">Safe mode</span>
-            <span class="tooltip" data-i18n-tooltip="tooltip_safe_mode" data-tooltip="Safe: isolated .browser-data profile, no logins. Unsafe: uses your browser profile (set UNSAFE_BROWSER_USER_DATA_DIR in .env, browser must be closed). Risk of profile corruption.">?</span>
+            <span class="tooltip" data-i18n-tooltip="tooltip_safe_mode" data-tooltip="Safe: isolated profile. Unsafe: uses your browser profile.">?</span>
+          </div>
+          <div id="unsafe-panel" class="unsafe-panel hidden">
+            <div class="unsafe-title" data-i18n="unsafe_title">Unsafe mode setup</div>
+            <div class="unsafe-hint" data-i18n="unsafe_hint">
+              Reuse a browser profile to keep logins. Choose a browser and a profile path.
+            </div>
+            <label class="field">
+              <span data-i18n="unsafe_browser_label">Browser</span>
+              <select id="unsafe-browser">
+                <option value="auto" data-i18n="unsafe_browser_auto">Auto (default)</option>
+                <option value="msedge" data-i18n="unsafe_browser_edge">Microsoft Edge</option>
+                <option value="chrome" data-i18n="unsafe_browser_chrome">Google Chrome</option>
+                <option value="firefox" data-i18n="unsafe_browser_firefox">Mozilla Firefox</option>
+              </select>
+            </label>
+            <label class="field">
+              <span data-i18n="unsafe_profile_label">Profile path</span>
+              <input
+                type="text"
+                id="unsafe-profile"
+                data-i18n-placeholder="unsafe_profile_placeholder"
+                placeholder="auto (use default profile)"
+              />
+            </label>
+            <ul class="unsafe-list">
+              <li data-i18n="unsafe_note_root">Use the User Data root, not the Default folder.</li>
+              <li data-i18n="unsafe_note_edge">Edge: C:\Users\&lt;you&gt;\AppData\Local\Microsoft\Edge\User Data</li>
+              <li data-i18n="unsafe_note_chrome">Chrome: C:\Users\&lt;you&gt;\AppData\Local\Google\Chrome\User Data</li>
+              <li data-i18n="unsafe_note_firefox">Firefox: C:\Users\&lt;you&gt;\AppData\Roaming\Mozilla\Firefox\Profiles\&lt;profile&gt;</li>
+              <li data-i18n="unsafe_note_find_chrome">Find it in Edge/Chrome: open edge://version or chrome://version and copy “Profile Path”.</li>
+              <li data-i18n="unsafe_note_find_firefox">Find it in Firefox: open about:profiles and use “Root Directory”.</li>
+            </ul>
+            <div class="unsafe-warning" data-i18n="unsafe_warning">
+              Close the browser before starting. Some services may block automation.
+            </div>
+            <div class="unsafe-note" data-i18n="unsafe_note_sessions">
+              Logins are saved only in the profile you use. Switching Safe mode uses a different profile and may require login again.
+            </div>
           </div>
           <div class="settings-row">
             <label class="switch">
@@ -81,6 +119,14 @@
             </label>
             <span class="toggle-text" data-i18n="label_browser_only">Browser-only</span>
             <span class="tooltip" data-i18n-tooltip="tooltip_browser_only" data-tooltip="When enabled, the agent acts only via the browser. When disabled, it can answer directly in the console if no explicit browser task is given.">?</span>
+          </div>
+        </div>
+        <div class="settings-group">
+          <button id="clear-data" class="danger-button" type="button" data-i18n="button_clear_data">
+            Clear my data
+          </button>
+          <div class="clear-hint" data-i18n="hint_clear_data">
+            Clears saved UI settings (language, theme, provider, model, browser settings).
           </div>
         </div>
       </div>

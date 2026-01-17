@@ -69,7 +69,7 @@ class Settings:
             unsafe_browser_user_data_dir_value, browser_channel
         )
         browser_headless = os.getenv("BROWSER_HEADLESS", "0").strip() == "1"
-        browser_slow_mo_ms = int(os.getenv("BROWSER_SLOW_MO_MS", "250"))
+        browser_slow_mo_ms = int(os.getenv("BROWSER_SLOW_MO_MS", "30"))
         search_engine_url = os.getenv("SEARCH_ENGINE_URL", "https://www.google.com").strip()
 
         max_steps = int(os.getenv("MAX_STEPS", "60"))
@@ -84,7 +84,7 @@ class Settings:
         ollama_model = os.getenv("OLLAMA_MODEL", "")
         ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-        request_timeout_s = int(os.getenv("REQUEST_TIMEOUT_S", "60"))
+        request_timeout_s = int(os.getenv("REQUEST_TIMEOUT_S", "180"))
 
         return cls(
             llm_provider=llm_provider,

@@ -8,6 +8,7 @@ from urllib.parse import quote
 from ..llm.base import BaseLLM, ToolCall
 from ..memory.state import MemoryState
 from ..tools.registry import tool_definitions
+from .prompts import BASE_AGENT_PROMPT
 from .utils import build_context, request_tool_call
 
 
@@ -42,6 +43,7 @@ class Navigator:
                 "navigate to a relevant site or a search engine first."
             )
         system_prompt = (
+            f"{BASE_AGENT_PROMPT} "
             "You are the Navigator sub-agent. Your job is to move through the website and "
             "reach the right page or UI state. Use only one tool call. "
             "Output tool calls only; do not answer in prose. "
@@ -49,7 +51,8 @@ class Navigator:
             "If you type into a search box, prefer setting press_enter=true to submit. "
             "If a search results page is visible, click the most relevant result link to reach the target site. "
             "Preserve the user's product terms and do not substitute them. Use goal_query if provided. "
-            "Avoid destructive actions. If login, 2FA, or captcha is needed, use ask_user. "
+            "Avoid destructive actions. Use ask_user only if login, 2FA, or captcha is needed, "
+            "or if you are truly blocked. Avoid repeated questions; reuse prior user choices. "
             "If you use ask_user, include 2-3 short numbered options the user can reply with. "
             "Prefer click/type on elements from snapshot by element_id. "
             "Never open About/Privacy/Terms pages unless explicitly requested. "

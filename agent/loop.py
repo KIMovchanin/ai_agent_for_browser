@@ -82,6 +82,9 @@ class AgentSession:
         self.no_progress_steps = 0
         self.last_url: Optional[str] = None
         self.last_title: Optional[str] = None
+        self.loading_waits = 0
+        self.user_choice_by_category: Dict[str, str] = {}
+        self.auto_user_replies = 0
 
         self.pending_action: Optional[PendingAction] = None
         self.waiting_confirm = False
@@ -102,6 +105,26 @@ class AgentSession:
     def request_stop(self) -> None:
         self.stop_requested = True
 
+    def force_stop(self, reason: str = "Stop requested.") -> None:
+        self.stop_requested = True
+        self.waiting_confirm = False
+        self.waiting_user = False
+        self._emit(
+            "log",
+            {
+                "step": self.step,
+                "tool": "stop_task",
+                "reason": reason,
+                "url": self.last_url,
+                "title": self.last_title,
+                "status": "warning",
+            },
+        )
+        try:
+            self._close()
+        except Exception:
+            pass
+
     def confirm(self) -> None:
         self.confirmed = True
         self.waiting_confirm = False
@@ -111,6 +134,12 @@ class AgentSession:
         cleaned = (text or "").strip()
         if not cleaned:
             return
+        category = self._question_category(self.user_question or "")
+        numeric = self._extract_numeric_choice(cleaned)
+        if category and numeric:
+            self.user_choice_by_category[category] = numeric
+        if self._should_stop_reply(cleaned):
+            self.request_stop()
         record = StepRecord(
             step=self.step,
             tool="user_input",
@@ -135,6 +164,18 @@ class AgentSession:
                 "output": cleaned[:160],
             },
         )
+        if self.stop_requested:
+            self._emit(
+                "log",
+                {
+                    "step": self.step,
+                    "tool": "stop_task",
+                    "reason": "User requested stop.",
+                    "url": self.last_url,
+                    "title": self.last_title,
+                    "status": "warning",
+                },
+            )
 
     def run(self) -> None:
         if self.done or self.stop_requested:
@@ -164,6 +205,10 @@ class AgentSession:
                 return
 
             snapshot = self.controller.snapshot()
+            if self._maybe_wait_for_loading(snapshot):
+                if self.done or self.waiting_confirm or self.waiting_user:
+                    return
+                continue
             self._update_progress(snapshot)
             self._maybe_mark_goal_url(snapshot.get("url") or "")
             if self._maybe_report_access_issue(snapshot):
@@ -267,6 +312,8 @@ class AgentSession:
 
             if tool_call.name == "ask_user":
                 question = tool_call.arguments.get("question") or "Need your input to continue."
+                if self._auto_answer_question(question):
+                    continue
                 self._pause_for_user(question)
                 return
             if tool_call.name == "finish":
@@ -405,6 +452,25 @@ class AgentSession:
         self._pause_for_user(issue)
         return True
 
+    def _maybe_wait_for_loading(self, snapshot: Dict[str, Any]) -> bool:
+        reason = self._detect_loading(snapshot)
+        if not reason:
+            self.loading_waits = 0
+            return False
+        self.no_progress_steps = 0
+        self.loading_waits += 1
+        if self.loading_waits <= 5:
+            self._execute_tool(
+                ToolCall(name="wait_for_network_idle", arguments={}),
+                reason,
+                snapshot,
+            )
+            return True
+        self._pause_for_user(
+            "Похоже, страница всё ещё загружается. Проверьте её и подтвердите, как продолжить."
+        )
+        return True
+
     @staticmethod
     def _detect_access_issue(snapshot: Dict[str, Any]) -> Optional[str]:
         title = (snapshot.get("title") or "").lower()
@@ -459,6 +525,72 @@ class AgentSession:
             if re.search(pattern, corpus):
                 return message
         return None
+
+    @staticmethod
+    def _detect_loading(snapshot: Dict[str, Any]) -> Optional[str]:
+        title = (snapshot.get("title") or "").lower()
+        text = (snapshot.get("visible_text_summary") or "").lower()
+        corpus = f"{title} {text}"
+        patterns = [
+            r"\bподождите\b",
+            r"\bподождите\.\.\.\b",
+            r"\bзагрузка\b",
+            r"\bидет загрузка\b",
+            r"\bloading\b",
+            r"\bplease wait\b",
+            r"\bjust a moment\b",
+            r"\bprocessing\b",
+        ]
+        if any(re.search(pattern, corpus) for pattern in patterns):
+            return "\u0418\u0434\u0451\u0442 \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0430; \u0436\u0434\u0443 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u0438\u044f."
+        return None
+
+    @staticmethod
+    def _extract_numeric_choice(text: str) -> Optional[str]:
+        match = re.search(r"\\b([1-9])\\b", text)
+        return match.group(1) if match else None
+
+    @staticmethod
+    def _question_category(question: str) -> str:
+        if not question:
+            return ""
+        lowered = question.lower()
+        patterns = [
+            ("login", r"login|log in|sign in|\u0432\u043e\u0439\u0442\u0438|\u0432\u0445\u043e\u0434|\u0430\u0432\u0442\u043e\u0440\u0438\u0437\u0430\u0446"),
+            ("captcha", r"captcha|\u043a\u0430\u043f\u0447\u0430|\u043d\u0435 \u0440\u043e\u0431\u043e\u0442"),
+            ("delete", r"delete|\u0443\u0434\u0430\u043b|\u0441\u043f\u0430\u043c"),
+            ("payment", r"pay|payment|checkout|\u043e\u043f\u043b\u0430\u0442|\u0437\u0430\u043a\u0430\u0437"),
+            ("loading", r"loading|\u043f\u043e\u0434\u043e\u0436\u0434\u0438\u0442\u0435|\u0437\u0430\u0433\u0440\u0443\u0437"),
+        ]
+        for name, pattern in patterns:
+            if re.search(pattern, lowered):
+                return name
+        return ""
+
+    def _auto_answer_question(self, question: str) -> bool:
+        category = self._question_category(question)
+        if not category:
+            return False
+        if category in {"login", "captcha"}:
+            return False
+        if self.auto_user_replies >= 2:
+            return False
+        stored = self.user_choice_by_category.get(category)
+        if not stored:
+            return False
+        self.auto_user_replies += 1
+        self._emit(
+            "log",
+            {
+                "step": self.step,
+                "tool": "user_input",
+                "reason": "Auto-reply using previous choice.",
+                "status": "warning",
+                "output": stored,
+            },
+        )
+        self.provide_user_input(stored)
+        return True
 
     def _detect_loop(self, tool_call: ToolCall, snapshot: Dict[str, Any]) -> Optional[str]:
         if tool_call.name != "navigate":
@@ -642,6 +774,8 @@ class AgentSession:
     def _close(self) -> None:
         if not self.close_controller:
             return
+        if not self.settings.browser_headless:
+            return
         try:
             self.controller.close()
         except Exception:
@@ -752,6 +886,30 @@ class AgentSession:
             return ""
         title = self.last_title or ""
         return f"Current page: {title} ({self.last_url})" if title else f"Current page: {self.last_url}"
+
+    def _should_stop_reply(self, text: str) -> bool:
+        normalized = (text or "").strip().lower()
+        if normalized in {"stop", "cancel", "exit", "quit", "end", "стоп", "остановить", "отмена", "выход"}:
+            return True
+        if normalized.isdigit():
+            stop_numbers = self._stop_option_numbers()
+            if normalized in stop_numbers:
+                return True
+        return False
+
+    def _stop_option_numbers(self) -> set[str]:
+        numbers: set[str] = set()
+        question = (self.user_question or "").lower()
+        if not question:
+            return numbers
+        option_pattern = re.compile(r"^\s*(\d+)[\).\]]\s*(.+)$", re.MULTILINE)
+        for match in option_pattern.finditer(question):
+            number, label = match.group(1), match.group(2)
+            if re.search(r"\bstop\b|\bexit\b|\bcancel\b|\bquit\b|останов|выход|отмена", label):
+                numbers.add(number)
+        if "остановить задачу" in question:
+            numbers.add("2")
+        return numbers
 
     def _guard_tool_call(
         self,
@@ -894,8 +1052,32 @@ class AgentSession:
     def _is_search_home(url: str) -> bool:
         if not url:
             return False
+        try:
+            from urllib.parse import urlparse
+        except Exception:
+            urlparse = None
         lowered = url.lower()
-        search_hosts = ("duckduckgo.com", "google.com", "bing.com", "yandex.")
-        if not any(host in lowered for host in search_hosts):
+        if urlparse:
+            parsed = urlparse(lowered)
+            host = parsed.netloc
+            path = parsed.path or ""
+        else:
+            host = lowered
+            path = ""
+
+        search_hosts = {
+            "duckduckgo.com",
+            "www.duckduckgo.com",
+            "google.com",
+            "www.google.com",
+            "bing.com",
+            "www.bing.com",
+            "yandex.ru",
+            "www.yandex.ru",
+            "ya.ru",
+        }
+        if host not in search_hosts:
+            return False
+        if "mail" in path or "passport" in path:
             return False
         return "q=" not in lowered and "search" not in lowered and "query" not in lowered

@@ -13,7 +13,7 @@ from queue import Queue
 from typing import Any, Callable, Deque, Dict, Optional
 
 from agent.browser.controller import BrowserController
-from agent.config import Settings
+from agent.config import Settings, _resolve_unsafe_user_data_dir
 from agent.llm import create_llm
 from agent.llm.base import LLMError
 from agent.loop import AgentSession
@@ -33,6 +33,9 @@ class Task:
     model: Optional[str] = None
     provider: Optional[str] = None
     safe_mode: bool = True
+    unsafe_profile_dir: Optional[str] = None
+    browser_engine: Optional[str] = None
+    browser_channel: Optional[str] = None
     result: Optional[str] = None
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -58,6 +61,9 @@ class TaskManager:
         model: Optional[str] = None,
         provider: Optional[str] = None,
         safe_mode: bool = True,
+        unsafe_profile_dir: Optional[str] = None,
+        browser_engine: Optional[str] = None,
+        browser_channel: Optional[str] = None,
     ) -> Task:
         with self.lock:
             if any(
@@ -72,7 +78,7 @@ class TaskManager:
             elif not browser_only and not self._is_browser_task(prompt):
                 mode = "direct"
             self.logger.info(
-                "Create task id=%s mode=%s browser_only=%s search_engine=%s provider=%s model=%s safe_mode=%s prompt=%s",
+                "Create task id=%s mode=%s browser_only=%s search_engine=%s provider=%s model=%s safe_mode=%s browser_engine=%s browser_channel=%s prompt=%s",
                 task_id,
                 mode,
                 browser_only,
@@ -80,6 +86,8 @@ class TaskManager:
                 provider or "-",
                 model or "-",
                 safe_mode,
+                browser_engine or "-",
+                browser_channel or "-",
                 self._compact(prompt),
             )
 
@@ -96,6 +104,9 @@ class TaskManager:
                 model=model,
                 provider=provider,
                 safe_mode=safe_mode,
+                unsafe_profile_dir=unsafe_profile_dir,
+                browser_engine=browser_engine,
+                browser_channel=browser_channel,
             )
             self.tasks[task_id] = task
 
@@ -115,6 +126,11 @@ class TaskManager:
             self.logger.info("Confirm task id=%s status=%s", task.task_id, task.status)
             if response:
                 task.session.provide_user_input(response)
+            if task.session.stop_requested:
+                task.session.force_stop("User selected stop option.")
+                task.status = "stopped"
+                self._emit(task, "status", {"status": task.status})
+                return task
             task.session.confirm()
             self._enqueue(task)
         return task
@@ -123,8 +139,10 @@ class TaskManager:
         task = self.get_task(task_id)
         if task.session:
             self.logger.info("Stop task id=%s status=%s", task.task_id, task.status)
-            task.session.request_stop()
-            self._enqueue(task)
+            task.session.force_stop("Stop button pressed.")
+            task.status = "stopped"
+            self._emit(task, "status", {"status": task.status})
+            return task
         else:
             task.status = "stopped"
             self._emit(task, "status", {"status": task.status})
@@ -186,6 +204,7 @@ class TaskManager:
                         task.session.emit = self._build_emitter(task)
                     except (LLMError, ValueError) as exc:
                         task.status = "error"
+                        self._emit_rate_limit_if_needed(task, str(exc))
                         self._emit(task, "error", {"error": str(exc)})
                         self._emit(task, "status", {"status": task.status})
                         return
@@ -208,12 +227,24 @@ class TaskManager:
                 self._emit(task, "error", {"error": "Missing agent session."})
         except Exception as exc:  # pylint: disable=broad-except
             task.status = "error"
+            self._emit_rate_limit_if_needed(task, str(exc))
             self._emit(task, "error", {"error": str(exc)})
 
         self._emit(task, "status", {"status": task.status})
 
     def _run_direct(self, task: Task) -> None:
         try:
+            canned = self._maybe_direct_capabilities_answer(task.prompt)
+            if canned:
+                task.result = canned
+                task.status = "done"
+                self._emit(
+                    task,
+                    "log",
+                    {"step": 1, "tool": "direct_answer", "reason": "Capability response.", "status": "ok"},
+                )
+                self._emit(task, "result", {"result": canned})
+                return
             llm = create_llm(self._settings_for_task(task))
             reason = "Browser-only disabled and task is not explicit."
             self.logger.info("Direct mode id=%s reason=%s", task.task_id, reason)
@@ -222,8 +253,12 @@ class TaskManager:
                     {
                         "role": "system",
                         "content": (
-                            "Answer the user directly without browser actions. "
-                            "Be concise and factual. If unsure, say so."
+                            "You are an AI browser automation agent controlling a real, visible browser via tools. "
+                            "Direct mode means you cannot use browser tools for this request. "
+                            "Respond in the user's language. Be concise and factual. "
+                            "Do not claim you browsed or performed actions. "
+                            "If the user asks what you can do, describe your browser-agent capabilities and ask "
+                            "for a concrete task. If the request requires browsing, suggest enabling browser-only."
                         ),
                     },
                     {"role": "user", "content": task.prompt},
@@ -241,7 +276,78 @@ class TaskManager:
             self._emit(task, "result", {"result": text})
         except LLMError as exc:
             task.status = "error"
+            self._emit_rate_limit_if_needed(task, str(exc))
             self._emit(task, "error", {"error": str(exc)})
+
+    @staticmethod
+    def _has_cyrillic(text: str) -> bool:
+        return bool(re.search(r"[А-Яа-яЁё]", text or ""))
+
+    def _emit_rate_limit_if_needed(self, task: Task, error_text: str) -> None:
+        message = self._rate_limit_message(error_text)
+        if not message:
+            return
+        self._emit(
+            task,
+            "log",
+            {
+                "step": 0,
+                "tool": "rate_limit",
+                "status": "warning",
+                "reason": message,
+                "error": self._compact(error_text, limit=240),
+            },
+        )
+
+    @staticmethod
+    def _rate_limit_message(error_text: str) -> Optional[str]:
+        if not error_text:
+            return None
+        lowered = error_text.lower()
+        markers = [
+            "429",
+            "too many requests",
+            "rate limit",
+            "tpm",
+            "rpm",
+            "quota",
+        ]
+        if not any(marker in lowered for marker in markers):
+            return None
+        if "tpm" in lowered or "tokens per min" in lowered:
+            return "Rate limit reached (TPM). Wait a bit or reduce request size."
+        if "rpm" in lowered or "requests per min" in lowered:
+            return "Rate limit reached (RPM). Wait a bit before retrying."
+        return "Rate limit reached. Please wait and try again."
+
+    @staticmethod
+    def _maybe_direct_capabilities_answer(prompt: str) -> Optional[str]:
+        if not prompt:
+            return None
+        text = prompt.strip().lower()
+        patterns = [
+            r"\bчто ты умеешь\b",
+            r"\bчто ты можешь\b",
+            r"\bтвои возможности\b",
+            r"\bwhat can you do\b",
+            r"\bwhat do you do\b",
+            r"\byour capabilities\b",
+        ]
+        if not any(re.search(pattern, text) for pattern in patterns):
+            return None
+        if TaskManager._has_cyrillic(prompt):
+            return (
+                "Я браузерный агент: могу переходить по сайтам, искать информацию, заполнять формы, "
+                "собирать данные и подготавливать действия в браузере. "
+                "В режиме «Только браузер» работаю автономно, а перед опасными действиями прошу подтверждение. "
+                "Сформулируйте конкретную задачу (сайт и цель) или включите «Только браузер»."
+            )
+        return (
+            "I am a browser automation agent: I can navigate sites, search, fill forms, gather data, "
+            "and prepare actions in the browser. "
+            "In Browser-only mode I work autonomously and ask for confirmation before risky actions. "
+            "Give me a concrete task (site + goal) or enable Browser-only."
+        )
 
     @staticmethod
     def _force_direct(prompt: str) -> bool:
@@ -420,7 +526,17 @@ class TaskManager:
         if provider not in {"openai", "anthropic", "gemini", "google", "ollama"}:
             raise ValueError(f"Unsupported provider: {provider}")
 
-        settings = replace(settings, llm_provider=provider)
+        browser_engine = (task.browser_engine or settings.browser_engine).strip().lower()
+        browser_channel = task.browser_channel or settings.browser_channel
+        unsafe_channel_hint = browser_channel or ""
+        if browser_engine == "firefox":
+            unsafe_channel_hint = "firefox"
+        settings = replace(
+            settings,
+            llm_provider=provider,
+            browser_engine=browser_engine,
+            browser_channel=browser_channel,
+        )
         if provider in {"gemini", "google"}:
             if not settings.google_api_key:
                 raise ValueError("Missing GOOGLE_API_KEY for Gemini provider.")
@@ -442,12 +558,19 @@ class TaskManager:
             if task.model:
                 settings = replace(settings, anthropic_model=task.model)
         if not task.safe_mode:
-            unsafe_dir = settings.unsafe_browser_user_data_dir
+            unsafe_value = _normalize_profile_value(task.unsafe_profile_dir)
+            if unsafe_value is None and settings.unsafe_browser_user_data_dir:
+                unsafe_value = str(settings.unsafe_browser_user_data_dir)
+            unsafe_dir = _resolve_unsafe_user_data_dir(unsafe_value, unsafe_channel_hint)
             if not unsafe_dir:
                 raise ValueError("Unsafe mode requires UNSAFE_BROWSER_USER_DATA_DIR in .env.")
             if not unsafe_dir.exists() or not unsafe_dir.is_dir():
                 raise ValueError(f"Unsafe profile path not found: {unsafe_dir}")
-            settings = replace(settings, browser_user_data_dir=unsafe_dir)
+            settings = replace(
+                settings,
+                browser_user_data_dir=unsafe_dir,
+                unsafe_browser_user_data_dir=unsafe_dir,
+            )
         return settings
 
     @staticmethod
@@ -485,3 +608,25 @@ class TaskManager:
         if not value:
             return options["google"]
         return options.get(value.lower(), options["google"])
+
+
+def _normalize_profile_value(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    cleaned = value.strip().strip('"').strip("'")
+    if not cleaned:
+        return None
+    if cleaned.lower() == "auto":
+        return "auto"
+    label_patterns = [
+        r"^(edge|chrome|firefox|yandex|opera)\s*[:\-]\s*",
+        r"^(?:браузер|путь)\s*[:\-]\s*",
+        r"^(?:profile path|root directory)\s*[:\-]\s*",
+        r"^(?:путь профиля|корневая папка)\s*[:\-]\s*",
+    ]
+    for pattern in label_patterns:
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+    match = re.search(r"[A-Za-z]:\\\\.+", cleaned)
+    if match:
+        cleaned = match.group(0)
+    return cleaned.strip() if cleaned else None

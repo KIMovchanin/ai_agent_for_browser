@@ -43,8 +43,14 @@ class BrowserController:
 
         try:
             self.context = browser_type.launch_persistent_context(**launch_kwargs)
-        except Exception:
+        except Exception as exc:
             if engine == "chromium" and channel:
+                if self._uses_unsafe_profile():
+                    raise RuntimeError(
+                        "Failed to launch the system browser with the unsafe profile. "
+                        "Close all browser windows and try again, or disable unsafe mode. "
+                        "Make sure the profile path points to the User Data root (not Default)."
+                    ) from exc
                 launch_kwargs.pop("channel", None)
                 self.context = self.playwright.chromium.launch_persistent_context(**launch_kwargs)
             else:
@@ -116,6 +122,10 @@ class BrowserController:
         finally:
             self.context.close()
             self.playwright.stop()
+
+    def _uses_unsafe_profile(self) -> bool:
+        unsafe = self.settings.unsafe_browser_user_data_dir
+        return bool(unsafe and self.settings.browser_user_data_dir == unsafe)
 
     def snapshot(self) -> Dict[str, Any]:
         snapshot = build_snapshot(self.page)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from typing import Optional
 
 import httpx
@@ -25,6 +26,12 @@ else:
     for handler in root_logger.handlers:
         handler.setLevel(logging.INFO)
 root_logger.setLevel(logging.INFO)
+if not any(isinstance(handler, logging.StreamHandler) for handler in root_logger.handlers):
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(
+        logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+    )
+    root_logger.addHandler(stream_handler)
 for name in ("app", "app.task_manager", "agent.loop", "agent.browser"):
     child = logging.getLogger(name)
     child.setLevel(logging.INFO)
@@ -77,6 +84,9 @@ class TaskCreate(BaseModel):
     model: Optional[str] = None
     provider: Optional[str] = None
     safe_mode: bool = True
+    unsafe_profile_dir: Optional[str] = None
+    browser_engine: Optional[str] = None
+    browser_channel: Optional[str] = None
 
 
 class ModelListRequest(BaseModel):
@@ -110,6 +120,9 @@ def create_task(payload: TaskCreate):
             model=payload.model,
             provider=payload.provider,
             safe_mode=payload.safe_mode,
+            unsafe_profile_dir=payload.unsafe_profile_dir,
+            browser_engine=payload.browser_engine,
+            browser_channel=payload.browser_channel,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

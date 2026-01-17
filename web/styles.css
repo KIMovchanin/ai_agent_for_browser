@@ -442,3 +442,69 @@ pre.models-output {
   font-size: 12px;
   color: var(--muted);
 }
+
+.unsafe-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed #cbd5f5;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.unsafe-panel.hidden {
+  display: none;
+}
+
+.unsafe-panel .field {
+  width: 100%;
+}
+
+.unsafe-title {
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.unsafe-hint {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.unsafe-list {
+  margin: 8px 0 0 18px;
+  padding: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.unsafe-warning {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #b45309;
+}
+
+.danger-button {
+  background: #ef4444;
+  color: #fff;
+}
+
+.danger-button:hover {
+  background: #dc2626;
+}
+
+.clear-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+body[data-theme='dark'] .unsafe-panel {
+  background: #0f172a;
+  border-color: #334155;
+}
+
+body[data-theme='dark'] .unsafe-warning {
+  color: #fbbf24;
+}

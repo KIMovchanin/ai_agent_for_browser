@@ -41,7 +41,7 @@ def _element_name(text: str, aria_label: str, placeholder: str, name_attr: str) 
     return ""
 
 
-def build_snapshot(page: Page, max_elements: int = 60, max_text_chars: int = 2500) -> Dict[str, Any]:
+def build_snapshot(page: Page, max_elements: int = 80, max_text_chars: int = 10000) -> Dict[str, Any]:
     visible_text = ""
     try:
         visible_text = page.evaluate(

@@ -18,6 +18,10 @@ const langToggle = document.getElementById('lang-toggle');
 const langSpans = langToggle ? langToggle.querySelectorAll('[data-lang]') : [];
 const userReplyWrap = document.getElementById('user-reply');
 const userReplyInput = document.getElementById('user-reply-input');
+const unsafePanel = document.getElementById('unsafe-panel');
+const unsafeBrowserEl = document.getElementById('unsafe-browser');
+const unsafeProfileEl = document.getElementById('unsafe-profile');
+const clearDataBtn = document.getElementById('clear-data');
 
 const tabs = document.querySelectorAll('.tab');
 const tabPanels = document.querySelectorAll('.tab-panel');
@@ -52,7 +56,7 @@ let waitingForUserInput = false;
 
 const MODEL_OPTIONS = {
   gemini: ['gemini-2.0-flash-lite', 'gemini-2.5-flash-lite'],
-  openai: ['gpt-4.1-nano', 'gpt-4.1-mini', 'gpt-4.1'],
+  openai: ['gpt-4.1-nano', 'gpt-4.1-mini', 'gpt-4.1', 'gpt-5-mini', 'gpt-5.1', 'gpt-5.2'],
   ollama: ['qwen3:1.7b', 'functiongemma:latest'],
   anthropic: ['claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest'],
 };
@@ -71,9 +75,29 @@ const I18N = {
     label_safe_mode: 'Safe mode',
     label_browser_only: 'Browser-only',
     tooltip_safe_mode:
-      'Safe: isolated .browser-data profile, no logins. Unsafe: uses your browser profile (set UNSAFE_BROWSER_USER_DATA_DIR in .env, browser must be closed). Risk of profile corruption.',
+      'Safe: isolated profile. Unsafe: use your browser profile.',
     tooltip_browser_only:
       'When enabled, the agent acts only via the browser. When disabled, it can answer directly in the console if no explicit browser task is given.',
+    button_clear_data: 'Clear my data',
+    hint_clear_data: 'Clears saved UI settings (language, theme, provider, model, browser settings).',
+    confirm_clear_data: 'Clear saved UI settings?',
+    unsafe_title: 'Unsafe mode setup',
+    unsafe_hint: 'Reuse a browser profile to keep logins. Choose a browser and paste only the path.',
+    unsafe_browser_label: 'Browser',
+    unsafe_browser_auto: 'Auto (default)',
+    unsafe_browser_edge: 'Microsoft Edge',
+    unsafe_browser_chrome: 'Google Chrome',
+    unsafe_browser_firefox: 'Mozilla Firefox',
+    unsafe_profile_label: 'Profile path',
+    unsafe_profile_placeholder: 'auto (use default profile)',
+    unsafe_note_root: 'Use the User Data root, not the Default folder.',
+    unsafe_note_edge: 'Edge: C:\\Users\\<you>\\AppData\\Local\\Microsoft\\Edge\\User Data',
+    unsafe_note_chrome: 'Chrome: C:\\Users\\<you>\\AppData\\Local\\Google\\Chrome\\User Data',
+    unsafe_note_firefox: 'Firefox: C:\\Users\\<you>\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\<profile>',
+    unsafe_note_find_chrome: 'Find it in Edge/Chrome: open edge://version or chrome://version and copy “Profile Path”.',
+    unsafe_note_find_firefox: 'Find it in Firefox: open about:profiles and use “Root Directory”.',
+    unsafe_note_sessions: 'Logins are saved only in the selected profile. Switching Safe mode uses a different profile and may require logging in again.',
+    unsafe_warning: 'Close the browser before starting. Some services may block automation.',
     tab_agent: 'Agent',
     tab_models: 'Models',
     button_run: 'Run',
@@ -122,6 +146,7 @@ const I18N = {
     action_user_input: 'reply',
     action_tokens: 'tokens',
     action_guard: 'rerouting',
+    action_rate_limit: 'rate limit',
   },
   ru: {
     title: 'Browser Agent MVP',
@@ -136,9 +161,35 @@ const I18N = {
     label_safe_mode: '\u0411\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u0430\u044f \u0440\u0430\u0431\u043e\u0442\u0430',
     label_browser_only: '\u0422\u043e\u043b\u044c\u043a\u043e \u0431\u0440\u0430\u0443\u0437\u0435\u0440',
     tooltip_safe_mode:
-      '\u0412\u043a\u043b: \u0438\u0437\u043e\u043b\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0439 \u043f\u0440\u043e\u0444\u0438\u043b\u044c .browser-data, \u0432\u0445\u043e\u0434\u044b \u043d\u0435 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u044e\u0442\u0441\u044f. \u0412\u044b\u043a\u043b: \u043f\u0440\u043e\u0444\u0438\u043b\u044c \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0430 (\u0443\u043a\u0430\u0436\u0438\u0442\u0435 \u043f\u0443\u0442\u044c \u0432 .env: UNSAFE_BROWSER_USER_DATA_DIR, \u0431\u0440\u0430\u0443\u0437\u0435\u0440 \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c \u0437\u0430\u043a\u0440\u044b\u0442). \u0415\u0441\u0442\u044c \u0440\u0438\u0441\u043a \u043f\u043e\u0432\u0440\u0435\u0434\u0438\u0442\u044c \u043f\u0440\u043e\u0444\u0438\u043b\u044c.',
+      '\u0412\u043a\u043b: \u0438\u0437\u043e\u043b\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0439 \u043f\u0440\u043e\u0444\u0438\u043b\u044c. \u0412\u044b\u043a\u043b: \u043f\u0440\u043e\u0444\u0438\u043b\u044c \u0432\u0430\u0448\u0435\u0433\u043e \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0430.',
     tooltip_browser_only:
       '\u041f\u0440\u0438 \u0432\u043a\u043b\u044e\u0447\u0435\u043d\u043d\u043e\u043c \u0440\u0435\u0436\u0438\u043c\u0435 \u0430\u0433\u0435\u043d\u0442 \u0432\u044b\u043f\u043e\u043b\u043d\u044f\u0435\u0442 \u0437\u0430\u0434\u0430\u0447\u0438 \u0442\u043e\u043b\u044c\u043a\u043e \u0447\u0435\u0440\u0435\u0437 \u0431\u0440\u0430\u0443\u0437\u0435\u0440. \u041f\u0440\u0438 \u0432\u044b\u043a\u043b\u044e\u0447\u0435\u043d\u043d\u043e\u043c \u2014 \u043c\u043e\u0436\u0435\u0442 \u043e\u0442\u0432\u0435\u0447\u0430\u0442\u044c \u043f\u0440\u044f\u043c\u043e \u0432 \u043a\u043e\u043d\u0441\u043e\u043b\u0438 \u043d\u0438\u0436\u0435, \u0435\u0441\u043b\u0438 \u043d\u0435\u0442 \u044f\u0432\u043d\u043e\u0439 \u0437\u0430\u0434\u0430\u0447\u0438.',
+    button_clear_data: '\u041e\u0447\u0438\u0441\u0442\u0438\u0442\u044c \u043c\u043e\u0438 \u0434\u0430\u043d\u043d\u044b\u0435',
+    hint_clear_data:
+      '\u0423\u0434\u0430\u043b\u044f\u0435\u0442 \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d\u043d\u044b\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 UI (\u044f\u0437\u044b\u043a, \u0442\u0435\u043c\u0430, \u043f\u0440\u043e\u0432\u0430\u0439\u0434\u0435\u0440, \u043c\u043e\u0434\u0435\u043b\u044c, \u0431\u0440\u0430\u0443\u0437\u0435\u0440).',
+    confirm_clear_data: '\u0421\u0431\u0440\u043e\u0441\u0438\u0442\u044c \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d\u043d\u044b\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438?',
+    unsafe_title: '\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430 \u043d\u0435\u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0433\u043e \u0440\u0435\u0436\u0438\u043c\u0430',
+    unsafe_hint:
+      '\u0418\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u0442 \u043f\u0440\u043e\u0444\u0438\u043b\u044c \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0430 \u0434\u043b\u044f \u0432\u0445\u043e\u0434\u043e\u0432. \u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0431\u0440\u0430\u0443\u0437\u0435\u0440 \u0438 \u0432\u0441\u0442\u0430\u0432\u044c\u0442\u0435 \u0442\u043e\u043b\u044c\u043a\u043e \u043f\u0443\u0442\u044c.',
+    unsafe_browser_label: '\u0411\u0440\u0430\u0443\u0437\u0435\u0440',
+    unsafe_browser_auto: '\u0410\u0432\u0442\u043e (\u043f\u043e \u0443\u043c\u043e\u043b\u0447\u0430\u043d\u0438\u044e)',
+    unsafe_browser_edge: 'Microsoft Edge',
+    unsafe_browser_chrome: 'Google Chrome',
+    unsafe_browser_firefox: 'Mozilla Firefox',
+    unsafe_profile_label: '\u041f\u0443\u0442\u044c \u043a \u043f\u0440\u043e\u0444\u0438\u043b\u044e',
+    unsafe_profile_placeholder: 'auto (\u043f\u0440\u043e\u0444\u0438\u043b\u044c \u043f\u043e \u0443\u043c\u043e\u043b\u0447\u0430\u043d\u0438\u044e)',
+    unsafe_note_root: '\u041d\u0443\u0436\u0435\u043d \u043a\u043e\u0440\u043d\u0435\u0432\u043e\u0439 \u043f\u0440\u043e\u0444\u0438\u043b\u044c (User Data), \u043d\u0435 \u043f\u0430\u043f\u043a\u0430 Default.',
+    unsafe_note_edge: 'Edge: C:\\Users\\<user>\\AppData\\Local\\Microsoft\\Edge\\User Data',
+    unsafe_note_chrome: 'Chrome: C:\\Users\\<user>\\AppData\\Local\\Google\\Chrome\\User Data',
+    unsafe_note_firefox: 'Firefox: C:\\Users\\<user>\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\<profile>',
+    unsafe_note_find_chrome:
+      '\u0413\u0434\u0435 \u0432\u0437\u044f\u0442\u044c \u043f\u0443\u0442\u044c \u0432 Edge/Chrome: \u043e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 edge://version \u0438\u043b\u0438 chrome://version \u0438 \u0441\u043a\u043e\u043f\u0438\u0440\u0443\u0439\u0442\u0435 \u201cProfile Path\u201d.',
+    unsafe_note_find_firefox:
+      '\u0413\u0434\u0435 \u0432\u0437\u044f\u0442\u044c \u043f\u0443\u0442\u044c \u0432 Firefox: \u043e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 about:profiles \u0438 \u0432\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u201cRoot Directory\u201d.',
+    unsafe_note_sessions:
+      '\u0412\u0445\u043e\u0434\u044b \u0441\u043e\u0445\u0440\u0430\u043d\u044f\u044e\u0442\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u0432 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u043f\u0440\u043e\u0444\u0438\u043b\u0435. \u041f\u0440\u0438 \u043f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0438 \u043d\u0430 \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u044b\u0439 \u0440\u0435\u0436\u0438\u043c \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u0442\u0441\u044f \u0434\u0440\u0443\u0433\u043e\u0439 \u043f\u0440\u043e\u0444\u0438\u043b\u044c, \u0438 \u043c\u043e\u0436\u0435\u0442 \u043f\u043e\u0442\u0440\u0435\u0431\u043e\u0432\u0430\u0442\u044c\u0441\u044f \u0432\u0445\u043e\u0434 \u0437\u0430\u043d\u043e\u0432\u043e.',
+    unsafe_warning:
+      '\u041f\u0435\u0440\u0435\u0434 \u0437\u0430\u043f\u0443\u0441\u043a\u043e\u043c \u0437\u0430\u043a\u0440\u043e\u0439\u0442\u0435 \u0431\u0440\u0430\u0443\u0437\u0435\u0440. \u041d\u0435\u043a\u043e\u0442\u043e\u0440\u044b\u0435 \u0441\u0435\u0440\u0432\u0438\u0441\u044b \u043c\u043e\u0433\u0443\u0442 \u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0437\u0430\u0446\u0438\u044e.',
     tab_agent: '\u0410\u0433\u0435\u043d\u0442',
     tab_models: '\u041c\u043e\u0434\u0435\u043b\u0438',
     button_run: '\u0417\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c',
@@ -189,6 +240,7 @@ const I18N = {
     action_user_input: '\u043e\u0442\u0432\u0435\u0442',
     action_tokens: '\u0442\u043e\u043a\u0435\u043d\u044b',
     action_guard: '\u043f\u0435\u0440\u0435\u043d\u0430\u043f\u0440\u0430\u0432\u043b\u044f\u044e',
+    action_rate_limit: '\u043b\u0438\u043c\u0438\u0442',
   },
 };
 
@@ -236,6 +288,7 @@ function actionLabel(tool) {
     user_input: 'action_user_input',
     tokens: 'action_tokens',
     guard: 'action_guard',
+    rate_limit: 'action_rate_limit',
   };
   const key = map[tool] || '';
   return key ? t(key) : '';
@@ -276,6 +329,43 @@ function applyLanguage(lang) {
     }
   });
   setStatus(t('status_idle'));
+}
+
+function updateUnsafePanel() {
+  if (!unsafePanel || !safeModeEl) return;
+  unsafePanel.classList.toggle('hidden', safeModeEl.checked);
+}
+
+function cleanProfilePath(value) {
+  if (!value) return '';
+  let cleaned = value.trim().replace(/^["']|["']$/g, '');
+  if (!cleaned) return '';
+  if (/^auto$/i.test(cleaned)) return 'auto';
+  cleaned = cleaned.replace(
+    /^(edge|chrome|firefox|yandex|opera)\s*[:\-]\s*/i,
+    ''
+  );
+  cleaned = cleaned.replace(/^(profile path|root directory)\s*[:\-]\s*/i, '');
+  cleaned = cleaned.replace(/^(путь профиля|корневая папка)\s*[:\-]\s*/i, '');
+  const match = cleaned.match(/[A-Za-z]:\\\\.+/);
+  if (match) {
+    cleaned = match[0];
+  }
+  return cleaned.trim();
+}
+
+function mapUnsafeBrowserSelection(value) {
+  const selection = (value || 'auto').toLowerCase();
+  if (selection === 'msedge') {
+    return { engine: 'chromium', channel: 'msedge' };
+  }
+  if (selection === 'chrome') {
+    return { engine: 'chromium', channel: 'chrome' };
+  }
+  if (selection === 'firefox') {
+    return { engine: 'firefox', channel: null };
+  }
+  return { engine: 'auto', channel: null };
 }
 
 function appendLog(line) {
@@ -338,10 +428,20 @@ function loadSettings() {
     safeModeEl.checked = storedSafeMode === 'true';
   }
 
+  const storedUnsafeBrowser = localStorage.getItem('unsafe_browser') || 'auto';
+  if (unsafeBrowserEl) {
+    unsafeBrowserEl.value = storedUnsafeBrowser;
+  }
+  const storedUnsafeProfile = localStorage.getItem('unsafe_profile') || 'auto';
+  if (unsafeProfileEl) {
+    unsafeProfileEl.value = storedUnsafeProfile;
+  }
+
   const storedBrowserOnly = localStorage.getItem('browser_only');
   if (storedBrowserOnly !== null && browserOnlyEl) {
     browserOnlyEl.checked = storedBrowserOnly === 'true';
   }
+  updateUnsafePanel();
 }
 
 function setModelOptions(provider) {
@@ -397,6 +497,19 @@ function bindSettings() {
   if (safeModeEl) {
     safeModeEl.addEventListener('change', () => {
       localStorage.setItem('safe_mode', String(safeModeEl.checked));
+      updateUnsafePanel();
+    });
+  }
+
+  if (unsafeBrowserEl) {
+    unsafeBrowserEl.addEventListener('change', () => {
+      localStorage.setItem('unsafe_browser', unsafeBrowserEl.value);
+    });
+  }
+
+  if (unsafeProfileEl) {
+    unsafeProfileEl.addEventListener('input', () => {
+      localStorage.setItem('unsafe_profile', unsafeProfileEl.value);
     });
   }
 
@@ -423,6 +536,16 @@ function bindSettings() {
     langToggle.addEventListener('click', () => {
       const next = currentLang === 'ru' ? 'en' : 'ru';
       applyLanguage(next);
+    });
+  }
+
+  if (clearDataBtn) {
+    clearDataBtn.addEventListener('click', () => {
+      if (!window.confirm(t('confirm_clear_data'))) {
+        return;
+      }
+      localStorage.clear();
+      location.reload();
     });
   }
 }
@@ -569,17 +692,31 @@ runBtn.addEventListener('click', async () => {
   resetUI();
   setStatus(t('status_starting'));
   runBtn.disabled = true;
+  const payload = {
+    prompt,
+    browser_only: browserOnlyEl.checked,
+    search_engine: searchEngineEl.value,
+    model: modelEl ? modelEl.value : undefined,
+    provider: providerEl ? providerEl.value : undefined,
+    safe_mode: safeModeEl ? safeModeEl.checked : true,
+  };
+  if (safeModeEl && !safeModeEl.checked) {
+    const unsafeProfile = unsafeProfileEl ? unsafeProfileEl.value.trim() : '';
+    const cleanedProfile = cleanProfilePath(unsafeProfile);
+    payload.unsafe_profile_dir = cleanedProfile || 'auto';
+    const browserChoice = unsafeBrowserEl ? unsafeBrowserEl.value : 'auto';
+    const config = mapUnsafeBrowserSelection(browserChoice);
+    if (config.engine) {
+      payload.browser_engine = config.engine;
+    }
+    if (config.channel) {
+      payload.browser_channel = config.channel;
+    }
+  }
   const response = await fetch(`${API_BASE}/tasks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      prompt,
-      browser_only: browserOnlyEl.checked,
-      search_engine: searchEngineEl.value,
-      model: modelEl ? modelEl.value : undefined,
-      provider: providerEl ? providerEl.value : undefined,
-      safe_mode: safeModeEl ? safeModeEl.checked : true,
-    }),
+    body: JSON.stringify(payload),
   });
   if (!response.ok) {
     const err = await response.json();

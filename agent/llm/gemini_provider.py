@@ -18,7 +18,7 @@ class GeminiProvider(BaseLLM):
         timeout_s: int = 60,
         max_retries: int = 2,
         default_temperature: float = 0.2,
-        default_max_tokens: int = 600,
+        default_max_tokens: int = 1100,
         base_url: str = "https://generativelanguage.googleapis.com",
     ) -> None:
         self.api_key = api_key

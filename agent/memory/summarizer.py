@@ -7,7 +7,7 @@ from .state import MemoryState
 
 
 class Summarizer:
-    def __init__(self, llm: BaseLLM, max_history: int = 40, keep_last: int = 8) -> None:
+    def __init__(self, llm: BaseLLM, max_history: int = 80, keep_last: int = 12) -> None:
         self.llm = llm
         self.max_history = max_history
         self.keep_last = keep_last

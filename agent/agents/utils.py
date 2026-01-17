@@ -28,8 +28,8 @@ def build_context(
         "next_goal_url": select_next_goal_url(goal_urls, visited_goal_urls),
         "goal_url_ordered": should_enforce_goal_order(goal) if goal_urls else False,
         "memory_summary": memory.summary,
-        "facts": memory.facts[-3:],
-        "recent_steps": memory.recent_steps(limit=3),
+        "facts": memory.facts[-20:],
+        "recent_steps": memory.recent_steps(limit=20),
         "snapshot": _compact_snapshot(snapshot),
         "browser_only": browser_only,
         "has_browser_action": has_browser_action,
@@ -164,17 +164,19 @@ def _compact_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     if not snapshot:
         return {}
     visible_text = snapshot.get("visible_text_summary") or ""
-    if isinstance(visible_text, str) and len(visible_text) > 2500:
-        visible_text = visible_text[:2500] + "..."
+    if isinstance(visible_text, str) and len(visible_text) > 10000:
+        visible_text = visible_text[:10000] + "..."
     elements = snapshot.get("interactive_elements") or []
     compact_elements = []
-    for element in elements[:12]:
+    for element in elements[:40]:
         compact_elements.append(
             {
                 "id": element.get("id"),
                 "role": element.get("role"),
-                "name": (element.get("name") or "")[:80],
-                "text": (element.get("text") or "")[:80],
+                "name": (element.get("name") or "")[:160],
+                "text": (element.get("text") or "")[:160],
+                "aria_label": (element.get("aria_label") or "")[:160],
+                "bbox": element.get("bbox"),
             }
         )
     compact = {
@@ -188,7 +190,7 @@ def _compact_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         compact["warnings"] = warnings
     popups = snapshot.get("possible_popups") or []
     if popups:
-        compact["possible_popups"] = popups[:2]
+        compact["possible_popups"] = popups[:3]
     return compact
 
 

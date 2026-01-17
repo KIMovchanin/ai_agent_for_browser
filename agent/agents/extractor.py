@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from ..llm.base import BaseLLM, LLMResponse, ToolCall
 from ..memory.state import MemoryState
 from ..tools.registry import tool_definitions
+from .prompts import BASE_AGENT_PROMPT
 from .utils import build_context, request_tool_call
 
 
@@ -39,11 +40,14 @@ class Extractor:
                 "you have used browser tools to access information."
             )
         system_prompt = (
+            f"{BASE_AGENT_PROMPT} "
             "You are the Extractor sub-agent. Your job is to extract structured data or "
             "summaries that satisfy the goal. Prefer the extract tool with a concise schema. "
             "If the page is not ready, use navigation tools to reach the right content."
             " Preserve the user's product terms and do not substitute them."
-            " If you use ask_user, include 2-3 short numbered options the user can reply with."
+            " Use ask_user only if login, 2FA, or captcha is needed, or if blocked. "
+            "Avoid repeated questions; reuse prior user choices. "
+            "If you use ask_user, include 2-3 short numbered options the user can reply with."
             " Output tool calls only; do not answer in prose."
             + browser_note
         )
