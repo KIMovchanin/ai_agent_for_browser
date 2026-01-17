@@ -11,6 +11,14 @@ def create_llm(settings) -> BaseLLM:
         return MockProvider()
     if settings.dry_run:
         return MockProvider()
+    if provider == "ollama":
+        api_key = settings.ollama_api_key or "local"
+        return OpenAIProvider(
+            api_key=api_key,
+            base_url=settings.ollama_base_url,
+            model=settings.ollama_model,
+            timeout_s=settings.request_timeout_s,
+        )
     if provider in {"gemini", "google"}:
         if not settings.google_api_key:
             return MockProvider("Dry-run: missing Google API key.")

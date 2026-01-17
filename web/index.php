@@ -10,26 +10,33 @@
   <div class="container">
     <div class="header">
       <div class="title-block">
-        <h1>Browser Agent MVP</h1>
-        <p class="hint">Enter a multi-step task and watch the browser.</p>
+        <h1 data-i18n="title">Browser Agent MVP</h1>
+        <p class="hint" data-i18n="hint">Enter a multi-step task and watch the browser.</p>
       </div>
-      <button id="settings-button" class="icon-button" aria-label="Settings">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8.94 2.52-1.72-.7a7.36 7.36 0 0 0-.6-1.44l.76-1.7a.9.9 0 0 0-.2-.98l-1.43-1.43a.9.9 0 0 0-.98-.2l-1.7.76c-.46-.26-.95-.48-1.44-.6l-.7-1.72a.9.9 0 0 0-.84-.57h-2.02a.9.9 0 0 0-.84.57l-.7 1.72c-.5.12-.98.34-1.44.6l-1.7-.76a.9.9 0 0 0-.98.2L4.82 6.2a.9.9 0 0 0-.2.98l.76 1.7c-.26.46-.48.95-.6 1.44l-1.72.7a.9.9 0 0 0-.57.84v2.02c0 .37.22.7.57.84l1.72.7c.12.5.34.98.6 1.44l-.76 1.7a.9.9 0 0 0 .2.98l1.43 1.43c.26.26.64.34.98.2l1.7-.76c.46.26.95.48 1.44.6l.7 1.72c.14.35.47.57.84.57h2.02c.37 0 .7-.22.84-.57l.7-1.72c.5-.12.98-.34 1.44-.6l1.7.76c.34.14.72.06.98-.2l1.43-1.43c.26-.26.34-.64.2-.98l-.76-1.7c.26-.46.48-.95.6-1.44l1.72-.7c.35-.14.57-.47.57-.84v-2.02a.9.9 0 0 0-.57-.84Z"/>
-        </svg>
-      </button>
+      <div class="header-actions">
+        <button id="lang-toggle" class="lang-toggle" type="button" aria-label="Language">
+          <span data-lang="ru">RU</span>
+          <span class="divider">/</span>
+          <span data-lang="en">EN</span>
+        </button>
+        <button id="settings-button" class="icon-button" aria-label="Settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8.94 2.52-1.72-.7a7.36 7.36 0 0 0-.6-1.44l.76-1.7a.9.9 0 0 0-.2-.98l-1.43-1.43a.9.9 0 0 0-.98-.2l-1.7.76c-.46-.26-.95-.48-1.44-.6l-.7-1.72a.9.9 0 0 0-.84-.57h-2.02a.9.9 0 0 0-.84.57l-.7 1.72c-.5.12-.98.34-1.44.6l-1.7-.76a.9.9 0 0 0-.98.2L4.82 6.2a.9.9 0 0 0-.2.98l.76 1.7c-.26.46-.48.95-.6 1.44l-1.72.7a.9.9 0 0 0-.57.84v2.02c0 .37.22.7.57.84l1.72.7c.12.5.34.98.6 1.44l-.76 1.7a.9.9 0 0 0 .2.98l1.43 1.43c.26.26.64.34.98.2l1.7-.76c.46.26.95.48 1.44.6l.7 1.72c.14.35.47.57.84.57h2.02c.37 0 .7-.22.84-.57l.7-1.72c.5-.12.98-.34 1.44-.6l1.7.76c.34.14.72.06.98-.2l1.43-1.43c.26-.26.34-.64.2-.98l-.76-1.7c.26-.46.48-.95.6-1.44l1.72-.7c.35-.14.57-.47.57-.84v-2.02a.9.9 0 0 0-.57-.84Z"/>
+          </svg>
+        </button>
+      </div>
       <div id="settings-panel" class="settings-panel">
-        <div class="settings-title">&#1053;&#1072;&#1089;&#1090;&#1088;&#1086;&#1081;&#1082;&#1080;</div>
+        <div class="settings-title" data-i18n="settings_title">Settings</div>
         <div class="settings-group">
-          <div class="settings-label">&#1058;&#1077;&#1084;&#1072;</div>
+          <div class="settings-label" data-i18n="label_theme">Theme</div>
           <div class="theme-toggle">
-            <button class="theme-btn" data-theme="light">&#1057;&#1074;&#1077;&#1090;&#1083;&#1072;&#1103;</button>
-            <button class="theme-btn" data-theme="dark">&#1058;&#1077;&#1084;&#1085;&#1072;&#1103;</button>
+            <button class="theme-btn" data-theme="light" data-i18n="theme_light">Light</button>
+            <button class="theme-btn" data-theme="dark" data-i18n="theme_dark">Dark</button>
           </div>
         </div>
         <div class="settings-group">
           <label class="field">
-            <span>&#1055;&#1086;&#1080;&#1089;&#1082;&#1086;&#1074;&#1080;&#1082;</span>
+            <span data-i18n="label_search_engine">Search engine</span>
             <select id="search-engine">
               <option value="google">Google</option>
               <option value="duckduckgo">DuckDuckGo</option>
@@ -39,30 +46,67 @@
           </label>
         </div>
         <div class="settings-group">
+          <label class="field">
+            <span data-i18n="label_provider">LLM provider</span>
+            <select id="provider-select">
+              <option value="gemini">Google (Gemini)</option>
+              <option value="openai">OpenAI</option>
+              <option value="ollama">Local (Ollama)</option>
+              <option value="anthropic">Anthropic</option>
+            </select>
+          </label>
+        </div>
+        <div class="settings-group">
+          <label class="field">
+            <span data-i18n="label_model">Model</span>
+            <select id="model-select">
+              <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
+              <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+            </select>
+          </label>
+        </div>
+        <div class="settings-group">
+          <div class="settings-row">
+            <label class="switch">
+              <input type="checkbox" id="safe-mode" checked />
+              <span class="slider"></span>
+            </label>
+            <span class="toggle-text" data-i18n="label_safe_mode">Safe mode</span>
+            <span class="tooltip" data-i18n-tooltip="tooltip_safe_mode" data-tooltip="Safe: isolated .browser-data profile, no logins. Unsafe: uses your browser profile (set UNSAFE_BROWSER_USER_DATA_DIR in .env, browser must be closed). Risk of profile corruption.">?</span>
+          </div>
           <div class="settings-row">
             <label class="switch">
               <input type="checkbox" id="browser-only" checked />
               <span class="slider"></span>
             </label>
-            <span class="toggle-text">browser-only</span>
-            <span class="tooltip" data-tooltip="&#1055;&#1088;&#1080; &#1074;&#1082;&#1083;&#1102;&#1095;&#1077;&#1085;&#1085;&#1086;&#1084; &#1088;&#1077;&#1078;&#1080;&#1084;&#1077; &#1072;&#1075;&#1077;&#1085;&#1090; &#1074;&#1099;&#1087;&#1086;&#1083;&#1103;&#1077;&#1090; &#1079;&#1072;&#1076;&#1072;&#1095;&#1080; &#1090;&#1086;&#1083;&#1100;&#1082;&#1086; &#1095;&#1077;&#1088;&#1077;&#1079; &#1073;&#1088;&#1072;&#1091;&#1079;&#1077;&#1088;. &#1055;&#1088;&#1080; &#1074;&#1099;&#1082;&#1083;&#1102;&#1095;&#1077;&#1085;&#1085;&#1086;&#1084; &#8212; &#1084;&#1086;&#1078;&#1077;&#1090; &#1086;&#1090;&#1074;&#1077;&#1095;&#1072;&#1090;&#1100; &#1087;&#1088;&#1103;&#1084;&#1086; &#1074; &#1082;&#1086;&#1085;&#1089;&#1086;&#1083;&#1080; &#1085;&#1080;&#1078;&#1077;, &#1077;&#1089;&#1083;&#1080; &#1085;&#1077;&#1090; &#1103;&#1074;&#1085;&#1086;&#1081; &#1079;&#1072;&#1076;&#1072;&#1095;&#1080;; &#1074;&#1086;&#1079;&#1084;&#1086;&#1078;&#1085;&#1099; &#1085;&#1077;&#1073;&#1086;&#1083;&#1100;&#1096;&#1080;&#1077; &#1086;&#1096;&#1080;&#1073;&#1082;&#1080;.">?</span>
+            <span class="toggle-text" data-i18n="label_browser_only">Browser-only</span>
+            <span class="tooltip" data-i18n-tooltip="tooltip_browser_only" data-tooltip="When enabled, the agent acts only via the browser. When disabled, it can answer directly in the console if no explicit browser task is given.">?</span>
           </div>
         </div>
       </div>
     </div>
     <div class="tabs">
-      <button class="tab active" data-tab="agent">Agent</button>
-      <button class="tab" data-tab="models">Models</button>
+      <button class="tab active" data-tab="agent" data-i18n="tab_agent">Agent</button>
+      <button class="tab" data-tab="models" data-i18n="tab_models">Models</button>
     </div>
     <div id="tab-agent" class="tab-panel active">
-      <textarea id="prompt" rows="5" placeholder="Example: Open wikipedia.org, search for Ada Lovelace, summarize 3 facts."></textarea>
+      <textarea id="prompt" rows="5" data-i18n-placeholder="prompt_placeholder" placeholder="Example: Open wikipedia.org, search for Ada Lovelace, summarize 3 facts."></textarea>
       <div class="controls">
-        <button id="run">Run</button>
-        <button id="confirm" disabled>Confirm / Continue</button>
-        <button id="stop" disabled>Stop</button>
+        <button id="run" data-i18n="button_run">Run</button>
+        <button id="confirm" disabled data-i18n="button_confirm">Confirm / Continue</button>
+        <button id="stop" disabled data-i18n="button_stop">Stop</button>
       </div>
-      <div class="status" id="status">Idle</div>
+      <div class="status" id="status" data-i18n="status_idle">Idle</div>
       <pre id="log"></pre>
+      <div id="user-reply" class="user-reply hidden">
+        <label class="field">
+          <span data-i18n="label_user_reply">User reply</span>
+          <input type="text" id="user-reply-input" data-i18n-placeholder="user_reply_placeholder" placeholder="Type your reply here." />
+        </label>
+        <div class="user-reply-hint" data-i18n="hint_user_reply">
+          Type your reply and click Confirm / Continue.
+        </div>
+      </div>
     </div>
     <div id="tab-models" class="tab-panel">
       <p class="hint">Keys are used only to fetch model lists and are not stored.</p>

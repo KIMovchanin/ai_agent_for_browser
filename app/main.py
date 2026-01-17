@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -15,13 +15,20 @@ from .task_manager import TaskManager
 
 
 logger = logging.getLogger("app")
-if not logging.getLogger().handlers:
+root_logger = logging.getLogger()
+if not root_logger.handlers:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
+else:
+    for handler in root_logger.handlers:
+        handler.setLevel(logging.INFO)
+root_logger.setLevel(logging.INFO)
 for name in ("app", "app.task_manager", "agent.loop", "agent.browser"):
-    logging.getLogger(name).setLevel(logging.INFO)
+    child = logging.getLogger(name)
+    child.setLevel(logging.INFO)
+    child.propagate = True
 
 settings = Settings.from_env()
 manager = TaskManager(settings)
@@ -36,6 +43,8 @@ def _log_startup() -> None:
         model = settings.anthropic_model
     elif provider in {"gemini", "google"}:
         model = settings.gemini_model
+    elif provider == "ollama":
+        model = settings.ollama_model
     else:
         model = settings.openai_model
     logger.info(
@@ -65,11 +74,18 @@ class TaskCreate(BaseModel):
     prompt: str
     browser_only: bool = True
     search_engine: Optional[str] = None
+    model: Optional[str] = None
+    provider: Optional[str] = None
+    safe_mode: bool = True
 
 
 class ModelListRequest(BaseModel):
     api_key: str
     base_url: Optional[str] = None
+
+
+class ConfirmRequest(BaseModel):
+    response: Optional[str] = None
 
 
 def _normalize_base_url(base_url: Optional[str], default: str) -> str:
@@ -91,6 +107,9 @@ def create_task(payload: TaskCreate):
             payload.prompt,
             browser_only=payload.browser_only,
             search_engine=payload.search_engine,
+            model=payload.model,
+            provider=payload.provider,
+            safe_mode=payload.safe_mode,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -124,9 +143,10 @@ def get_events(task_id: str):
 
 
 @app.post("/tasks/{task_id}/confirm")
-def confirm_task(task_id: str):
+def confirm_task(task_id: str, payload: Optional[ConfirmRequest] = Body(default=None)):
     try:
-        task = manager.confirm_task(task_id)
+        response = payload.response if payload else None
+        task = manager.confirm_task(task_id, response=response)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"task_id": task.task_id, "status": task.status}

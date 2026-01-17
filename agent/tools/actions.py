@@ -82,7 +82,7 @@ class ToolExecutor:
 
     def execute(self, name: str, args: Dict[str, Any]) -> ToolResult:
         if name == "navigate":
-            url = args.get("url", "")
+            url = self._normalize_url(args.get("url", ""))
             self.controller.navigate(url)
             return ToolResult(name=name, output={"url": url})
         if name == "snapshot":
@@ -143,3 +143,16 @@ class ToolExecutor:
             return ToolResult(name=name, output={"path": str(path)})
 
         raise ValueError(f"Unknown tool: {name}")
+
+    @staticmethod
+    def _normalize_url(url: str) -> str:
+        url = (url or "").strip()
+        if not url:
+            raise ValueError("navigate requires a URL")
+        if url.startswith(("http://", "https://")):
+            return url
+        if url.startswith("www."):
+            return f"https://{url}"
+        if re.match(r"^[a-z0-9-]+(\\.[a-z0-9-]+)+$", url, re.IGNORECASE):
+            return f"https://{url}"
+        return url

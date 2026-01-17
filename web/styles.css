@@ -48,6 +48,34 @@ body[data-theme="dark"] {
   gap: 16px;
 }
 
+.header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lang-toggle {
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.lang-toggle span.active {
+  color: var(--accent);
+}
+
+.lang-toggle .divider {
+  color: var(--muted);
+  font-weight: 400;
+}
+
 .title-block h1 {
   margin: 0;
 }
@@ -170,6 +198,11 @@ button.tab.active {
 
 .tab-panel.active {
   display: block;
+}
+
+.tab[data-tab="models"],
+#tab-models {
+  display: none;
 }
 
 textarea {
@@ -391,4 +424,21 @@ pre.models-output {
 #log {
   background: #000;
   color: #e5e7eb;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.user-reply {
+  margin-top: 12px;
+}
+
+.user-reply.hidden {
+  display: none;
+}
+
+.user-reply-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
 }

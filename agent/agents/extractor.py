@@ -20,8 +20,18 @@ class Extractor:
         snapshot: Dict[str, Any],
         browser_only: bool = False,
         has_browser_action: bool = False,
+        goal_urls: Optional[List[str]] = None,
+        visited_goal_urls: Optional[List[str]] = None,
     ) -> tuple[Optional[ToolCall], str]:
-        context = build_context(goal, memory, snapshot, browser_only, has_browser_action)
+        context = build_context(
+            goal,
+            memory,
+            snapshot,
+            browser_only,
+            has_browser_action,
+            goal_urls,
+            visited_goal_urls,
+        )
         browser_note = ""
         if browser_only:
             browser_note = (
@@ -32,6 +42,9 @@ class Extractor:
             "You are the Extractor sub-agent. Your job is to extract structured data or "
             "summaries that satisfy the goal. Prefer the extract tool with a concise schema. "
             "If the page is not ready, use navigation tools to reach the right content."
+            " Preserve the user's product terms and do not substitute them."
+            " If you use ask_user, include 2-3 short numbered options the user can reply with."
+            " Output tool calls only; do not answer in prose."
             + browser_note
         )
         messages: List[Dict[str, Any]] = [

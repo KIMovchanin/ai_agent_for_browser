@@ -20,15 +20,26 @@ class Reflector:
         snapshot: Dict[str, Any],
         browser_only: bool = False,
         has_browser_action: bool = False,
+        goal_urls: Optional[List[str]] = None,
+        visited_goal_urls: Optional[List[str]] = None,
     ) -> tuple[Optional[ToolCall], str]:
-        context = build_context(goal, memory, snapshot, browser_only, has_browser_action)
+        context = build_context(
+            goal,
+            memory,
+            snapshot,
+            browser_only,
+            has_browser_action,
+            goal_urls,
+            visited_goal_urls,
+        )
         browser_note = ""
         if browser_only:
             browser_note = " Browser-only mode is ON. Prefer browser recovery actions."
         system_prompt = (
             "You are the Reflector sub-agent. Diagnose why progress stalled or actions failed. "
             "Propose a recovery action (scroll, back, alternate click, wait, ask_user). "
-            "Use only one tool call."
+            "Use only one tool call. If you use ask_user, include 2-3 short numbered options. "
+            "Output tool calls only; do not answer in prose."
             + browser_note
         )
         messages: List[Dict[str, Any]] = [

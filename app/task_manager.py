@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import logging
 import re
+from urllib.parse import quote
 import threading
 import time
 import uuid
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 from queue import Queue
 from typing import Any, Callable, Deque, Dict, Optional
 
@@ -15,6 +17,7 @@ from agent.config import Settings
 from agent.llm import create_llm
 from agent.llm.base import LLMError
 from agent.loop import AgentSession
+from agent.agents.utils import extract_goal_query
 
 
 @dataclass
@@ -27,6 +30,9 @@ class Task:
     mode: str = "agent"
     browser_only: bool = True
     search_engine: str = "google"
+    model: Optional[str] = None
+    provider: Optional[str] = None
+    safe_mode: bool = True
     result: Optional[str] = None
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -41,6 +47,7 @@ class TaskManager:
         self.worker_queue: Queue[str] = Queue()
         self.worker_thread: Optional[threading.Thread] = None
         self.worker_controller: Optional[BrowserController] = None
+        self.worker_profile_dir: Optional[Path] = None
         self.logger = logging.getLogger("app.task_manager")
 
     def create_task(
@@ -48,6 +55,9 @@ class TaskManager:
         prompt: str,
         browser_only: bool = True,
         search_engine: Optional[str] = None,
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
+        safe_mode: bool = True,
     ) -> Task:
         with self.lock:
             if any(
@@ -62,11 +72,14 @@ class TaskManager:
             elif not browser_only and not self._is_browser_task(prompt):
                 mode = "direct"
             self.logger.info(
-                "Create task id=%s mode=%s browser_only=%s search_engine=%s prompt=%s",
+                "Create task id=%s mode=%s browser_only=%s search_engine=%s provider=%s model=%s safe_mode=%s prompt=%s",
                 task_id,
                 mode,
                 browser_only,
                 search_engine or "default",
+                provider or "-",
+                model or "-",
+                safe_mode,
                 self._compact(prompt),
             )
 
@@ -80,6 +93,9 @@ class TaskManager:
                 mode=mode,
                 browser_only=browser_only,
                 search_engine=(search_engine or "google"),
+                model=model,
+                provider=provider,
+                safe_mode=safe_mode,
             )
             self.tasks[task_id] = task
 
@@ -93,10 +109,12 @@ class TaskManager:
             raise KeyError("Task not found")
         return task
 
-    def confirm_task(self, task_id: str) -> Task:
+    def confirm_task(self, task_id: str, response: Optional[str] = None) -> Task:
         task = self.get_task(task_id)
         if task.session:
             self.logger.info("Confirm task id=%s status=%s", task.task_id, task.status)
+            if response:
+                task.session.provide_user_input(response)
             task.session.confirm()
             self._enqueue(task)
         return task
@@ -136,11 +154,14 @@ class TaskManager:
             task.status = "running"
             task.updated_at = time.time()
             self.logger.info(
-                "Task start id=%s mode=%s browser_only=%s search_engine=%s",
+                "Task start id=%s mode=%s browser_only=%s search_engine=%s provider=%s model=%s safe_mode=%s",
                 task.task_id,
                 task.mode,
                 task.browser_only,
                 task.search_engine,
+                task.provider or "-",
+                task.model or "-",
+                task.safe_mode,
             )
             if task.mode == "direct":
                 self._run_direct(task)
@@ -148,19 +169,22 @@ class TaskManager:
                 if not task.session:
                     try:
                         search_url = self._resolve_search_engine(task.search_engine)
-                        controller = self._get_worker_controller()
+                        start_url = self._extract_start_url(task.prompt)
+                        settings = self._settings_for_task(task)
+                        controller = self._get_worker_controller(settings)
                         task.session = AgentSession(
                             goal=task.prompt,
-                            settings=self.settings,
+                            settings=settings,
                             emit=None,
                             browser_only=task.browser_only,
                             search_engine_url=search_url,
                             create_window=False,
                             controller=controller,
                             close_controller=False,
+                            start_url=start_url,
                         )
                         task.session.emit = self._build_emitter(task)
-                    except LLMError as exc:
+                    except (LLMError, ValueError) as exc:
                         task.status = "error"
                         self._emit(task, "error", {"error": str(exc)})
                         self._emit(task, "status", {"status": task.status})
@@ -190,7 +214,7 @@ class TaskManager:
 
     def _run_direct(self, task: Task) -> None:
         try:
-            llm = create_llm(self.settings)
+            llm = create_llm(self._settings_for_task(task))
             reason = "Browser-only disabled and task is not explicit."
             self.logger.info("Direct mode id=%s reason=%s", task.task_id, reason)
             response = llm.complete(
@@ -363,8 +387,9 @@ class TaskManager:
             return text[:limit] + "..."
         return text
 
-    def _get_worker_controller(self) -> BrowserController:
-        if self.worker_controller:
+    def _get_worker_controller(self, settings: Settings) -> BrowserController:
+        desired_profile = settings.browser_user_data_dir
+        if self.worker_controller and self.worker_profile_dir == desired_profile:
             try:
                 self.worker_controller.select_page(start_new_window=False)
                 return self.worker_controller
@@ -374,10 +399,80 @@ class TaskManager:
                 except Exception:
                     pass
                 self.worker_controller = None
+                self.worker_profile_dir = None
 
-        self.worker_controller = BrowserController(self.settings, start_new_window=False)
-        self.logger.info("Created worker controller")
+        if self.worker_controller and self.worker_profile_dir != desired_profile:
+            try:
+                self.worker_controller.close()
+            except Exception:
+                pass
+            self.worker_controller = None
+            self.worker_profile_dir = None
+
+        self.worker_controller = BrowserController(settings, start_new_window=False)
+        self.worker_profile_dir = desired_profile
+        self.logger.info("Created worker controller profile=%s", desired_profile)
         return self.worker_controller
+
+    def _settings_for_task(self, task: Task) -> Settings:
+        settings = self.settings
+        provider = (task.provider or settings.llm_provider).strip().lower()
+        if provider not in {"openai", "anthropic", "gemini", "google", "ollama"}:
+            raise ValueError(f"Unsupported provider: {provider}")
+
+        settings = replace(settings, llm_provider=provider)
+        if provider in {"gemini", "google"}:
+            if not settings.google_api_key:
+                raise ValueError("Missing GOOGLE_API_KEY for Gemini provider.")
+            if task.model:
+                settings = replace(settings, gemini_model=task.model)
+        elif provider == "openai":
+            if not settings.openai_api_key:
+                raise ValueError("Missing OPENAI_API_KEY for OpenAI provider.")
+            if task.model:
+                settings = replace(settings, openai_model=task.model)
+        elif provider == "ollama":
+            if not settings.ollama_model and not task.model:
+                raise ValueError("Missing OLLAMA_MODEL for Ollama provider.")
+            if task.model:
+                settings = replace(settings, ollama_model=task.model)
+        elif provider == "anthropic":
+            if not settings.anthropic_api_key:
+                raise ValueError("Missing ANTHROPIC_API_KEY for Anthropic provider.")
+            if task.model:
+                settings = replace(settings, anthropic_model=task.model)
+        if not task.safe_mode:
+            unsafe_dir = settings.unsafe_browser_user_data_dir
+            if not unsafe_dir:
+                raise ValueError("Unsafe mode requires UNSAFE_BROWSER_USER_DATA_DIR in .env.")
+            if not unsafe_dir.exists() or not unsafe_dir.is_dir():
+                raise ValueError(f"Unsafe profile path not found: {unsafe_dir}")
+            settings = replace(settings, browser_user_data_dir=unsafe_dir)
+        return settings
+
+    @staticmethod
+    def _extract_start_url(prompt: str) -> str:
+        lowered = prompt.lower()
+        if "wikipedia" in lowered or "\u0432\u0438\u043a\u0438\u043f\u0435\u0434" in lowered:
+            query = extract_goal_query(prompt)
+            if query:
+                base = "https://en.wikipedia.org"
+                if "ru.wikipedia.org" in lowered or re.search(r"[\u0400-\u04FF]", prompt):
+                    base = "https://ru.wikipedia.org"
+                elif re.search(r"[\u0400-\u04FF]", query):
+                    base = "https://ru.wikipedia.org"
+                return f"{base}/w/index.php?search={quote(query)}"
+            return "https://www.wikipedia.org"
+        url_match = re.search(r"https?://\\S+", prompt)
+        if url_match:
+            return url_match.group(0).rstrip(").,;")
+        www_match = re.search(r"\\bwww\\.[^\\s]+", prompt)
+        if www_match:
+            return f"https://{www_match.group(0).rstrip(').,;')}"
+        domain_match = re.search(r"\\b([a-z0-9-]+\\.)+[a-z]{2,10}\\b", prompt, re.IGNORECASE)
+        if domain_match:
+            return f"https://{domain_match.group(0)}"
+        return ""
 
     @staticmethod
     def _resolve_search_engine(value: Optional[str]) -> str:

@@ -137,7 +137,7 @@ def tool_definitions() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "ask_user",
-                "description": "Ask the user for manual input or confirmation.",
+                "description": "Ask the user for manual input. Provide 2-3 short numbered options the user can choose from.",
                 "parameters": {
                     "type": "object",
                     "properties": {"question": {"type": "string"}},

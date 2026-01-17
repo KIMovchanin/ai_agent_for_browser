@@ -40,28 +40,50 @@ class OpenAIProvider(BaseLLM):
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
     ) -> LLMResponse:
-        payload: Dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature if temperature is not None else self.default_temperature,
-            "max_tokens": max_tokens if max_tokens is not None else self.default_max_tokens,
-        }
-        if tools:
-            payload["tools"] = tools
-        if tool_choice:
-            payload["tool_choice"] = tool_choice
-
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-
+        use_completion_tokens = False
+        omit_temperature = False
         for attempt in range(self.max_retries + 1):
             try:
+                payload: Dict[str, Any] = {
+                    "model": self.model,
+                    "messages": messages,
+                }
+                if not omit_temperature:
+                    payload["temperature"] = temperature if temperature is not None else self.default_temperature
+                token_value = max_tokens if max_tokens is not None else self.default_max_tokens
+                if use_completion_tokens:
+                    payload["max_completion_tokens"] = token_value
+                else:
+                    payload["max_tokens"] = token_value
+                if tools:
+                    payload["tools"] = tools
+                if tool_choice:
+                    payload["tool_choice"] = tool_choice
                 with httpx.Client(timeout=self.timeout_s) as client:
                     response = client.post(self._endpoint(), headers=headers, json=payload)
                 if response.status_code >= 400:
-                    raise LLMError(f"OpenAI error {response.status_code}: {response.text}")
+                    message = response.text
+                    if (
+                        response.status_code == 400
+                        and not use_completion_tokens
+                        and "max_completion_tokens" in message
+                        and "max_tokens" in message
+                    ):
+                        use_completion_tokens = True
+                        continue
+                    if (
+                        response.status_code == 400
+                        and not omit_temperature
+                        and "temperature" in message
+                        and "does not support" in message
+                    ):
+                        omit_temperature = True
+                        continue
+                    raise LLMError(f"OpenAI error {response.status_code}: {message}")
                 data = response.json()
                 message = data["choices"][0]["message"]
                 content = message.get("content")

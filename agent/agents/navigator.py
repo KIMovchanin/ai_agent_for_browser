@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+import re
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 from ..llm.base import BaseLLM, ToolCall
 from ..memory.state import MemoryState
@@ -20,8 +22,18 @@ class Navigator:
         snapshot: Dict[str, Any],
         browser_only: bool = False,
         has_browser_action: bool = False,
+        goal_urls: Optional[List[str]] = None,
+        visited_goal_urls: Optional[List[str]] = None,
     ) -> tuple[Optional[ToolCall], str]:
-        context = build_context(goal, memory, snapshot, browser_only, has_browser_action)
+        context = build_context(
+            goal,
+            memory,
+            snapshot,
+            browser_only,
+            has_browser_action,
+            goal_urls,
+            visited_goal_urls,
+        )
         browser_note = ""
         if browser_only:
             browser_note = (
@@ -32,11 +44,16 @@ class Navigator:
         system_prompt = (
             "You are the Navigator sub-agent. Your job is to move through the website and "
             "reach the right page or UI state. Use only one tool call. "
+            "Output tool calls only; do not answer in prose. "
             "If the goal includes a URL or domain name, navigate to it directly (do not search for it). "
             "If you type into a search box, prefer setting press_enter=true to submit. "
             "If a search results page is visible, click the most relevant result link to reach the target site. "
+            "Preserve the user's product terms and do not substitute them. Use goal_query if provided. "
             "Avoid destructive actions. If login, 2FA, or captcha is needed, use ask_user. "
-            "Prefer click/type on elements from snapshot by element_id."
+            "If you use ask_user, include 2-3 short numbered options the user can reply with. "
+            "Prefer click/type on elements from snapshot by element_id. "
+            "Never open About/Privacy/Terms pages unless explicitly requested. "
+            "Always include element_id or click_strategy for click/type, and include url for navigate."
             + browser_note
         )
         messages: List[Dict[str, Any]] = [
@@ -46,4 +63,140 @@ class Navigator:
 
         tools = tool_definitions()
         tool_call, reason = request_tool_call(self.llm, messages, tools)
-        return tool_call, reason
+        if tool_call:
+            return tool_call, reason
+        fallback_call, fallback_reason = self._fallback_tool(context, snapshot)
+        return fallback_call, fallback_reason or reason
+
+    @staticmethod
+    def _fallback_tool(
+        context: Dict[str, Any],
+        snapshot: Dict[str, Any],
+    ) -> Tuple[Optional[ToolCall], str]:
+        next_goal_url = (context.get("next_goal_url") or "").strip()
+        if next_goal_url:
+            current_url = (snapshot.get("url") or "").strip()
+            if next_goal_url not in current_url:
+                return (
+                    ToolCall(name="navigate", arguments={"url": next_goal_url}),
+                    "Fallback: navigate to the next goal URL.",
+                )
+        goal_url = (context.get("goal_url") or "").strip()
+        if goal_url:
+            current_url = (snapshot.get("url") or "").strip()
+            if goal_url not in current_url:
+                return ToolCall(name="navigate", arguments={"url": goal_url}), "Fallback: navigate to goal URL."
+
+        goal_text = (context.get("goal") or "").strip()
+        goal_query = (context.get("goal_query") or goal_text).strip()
+        if goal_text and ("wikipedia" in goal_text.lower() or "википед" in goal_text.lower()):
+            query = goal_query.strip()
+            if query:
+                base = "https://en.wikipedia.org"
+                if Navigator._contains_cyrillic(query) or Navigator._contains_cyrillic(goal_text):
+                    base = "https://ru.wikipedia.org"
+                url = f"{base}/w/index.php?search={quote(query)}"
+                current_url = (snapshot.get("url") or "").strip()
+                if base not in current_url:
+                    return ToolCall(
+                        name="navigate",
+                        arguments={"url": url},
+                    ), "Fallback: open Wikipedia search."
+        if not goal_query:
+            return None, ""
+
+        if not Navigator._is_search_context(snapshot, goal_text):
+            return None, ""
+
+        current_url = (snapshot.get("url") or "").lower()
+        if any(token in current_url for token in ["search=", "q=", "query="]):
+            element = Navigator._find_element_by_query(snapshot, goal_query)
+            if element and element.get("id"):
+                return (
+                    ToolCall(
+                        name="click",
+                        arguments={"element_id": element["id"]},
+                    ),
+                    "Fallback: click a result matching the query.",
+                )
+
+        element = Navigator._pick_search_input(snapshot)
+        if element and element.get("id"):
+            return (
+                ToolCall(
+                    name="type",
+                    arguments={
+                        "element_id": element["id"],
+                        "text": goal_query,
+                        "press_enter": True,
+                    },
+                ),
+                "Fallback: type search query into search field.",
+            )
+        return None, ""
+
+    @staticmethod
+    def _find_element_by_query(snapshot: Dict[str, Any], query: str) -> Optional[Dict[str, Any]]:
+        if not query:
+            return None
+        elements = snapshot.get("interactive_elements", []) or []
+        query_lower = query.lower()
+        tokens = [t for t in re.split(r"\s+", query_lower) if len(t) > 2]
+        for element in elements:
+            role = (element.get("role") or "").lower()
+            if role not in {"link", "button"}:
+                continue
+            text = " ".join(
+                [
+                    element.get("name") or "",
+                    element.get("aria_label") or "",
+                    element.get("text") or "",
+                ]
+            ).lower()
+            if query_lower in text:
+                return element
+            if tokens and all(token in text for token in tokens):
+                return element
+        return None
+
+    @staticmethod
+    def _pick_search_input(snapshot: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        elements = snapshot.get("interactive_elements", []) or []
+        keywords = (
+            "search",
+            "find",
+            "looking for",
+            "\u043f\u043e\u0438\u0441\u043a",
+            "\u0438\u0441\u043a\u0430\u0442\u044c",
+            "\u043d\u0430\u0439\u0442\u0438",
+            "\u0432\u0432\u0435\u0434\u0438\u0442\u0435",
+        )
+        roles = {"input", "textbox", "searchbox", "combobox"}
+
+        for element in elements:
+            role = (element.get("role") or "").lower()
+            if role not in roles:
+                continue
+            label = " ".join(
+                [
+                    element.get("name") or "",
+                    element.get("aria_label") or "",
+                    element.get("text") or "",
+                ]
+            ).lower()
+            if any(keyword in label for keyword in keywords):
+                return element
+        return None
+
+    @staticmethod
+    def _is_search_context(snapshot: Dict[str, Any], goal_text: str) -> bool:
+        current_url = (snapshot.get("url") or "").lower()
+        if any(host in current_url for host in ["duckduckgo.com", "google.com", "bing.com", "yandex."]):
+            return True
+        if re.search(r"\b(find|search|look for|searching|найди|поиск|искать|ищи|найти)\b", goal_text, re.IGNORECASE):
+            return True
+        return False
+
+    @staticmethod
+    def _contains_cyrillic(text: str) -> bool:
+        return re.search(r"[\u0400-\u04FF]", text) is not None

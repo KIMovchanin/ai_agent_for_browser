@@ -65,14 +65,14 @@ Dry-run mode:
 
 Provider selection:
 
-- `LLM_PROVIDER=openai|anthropic|gemini|google|mock`
+- `LLM_PROVIDER=openai|anthropic|gemini|google|ollama|mock`
 
 OpenAI-compatible config:
 
 ```
 LLM_PROVIDER=openai
 OPENAI_API_KEY=your_key_here
-OPENAI_MODEL=o4-mini
+OPENAI_MODEL=gpt-4.1-nano
 ```
 
 Anthropic config:
@@ -88,16 +88,25 @@ Google AI Studio (Gemini) config:
 ```
 LLM_PROVIDER=gemini
 GOOGLE_API_KEY=your_key_here
-GEMINI_MODEL=gemini-2.5-flash-lite
+GEMINI_MODEL=gemini-2.0-flash-lite
 ```
 
 Gemini model availability is validated on task start via ListModels. If the model is not available or does not support generateContent, the API returns a 400 error with guidance.
 
+Ollama (local) config:
+
+```
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=qwen3:1.7b
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
 Browser selection and search engine:
 
 - `BROWSER_ENGINE=auto|chromium|firefox` (auto tries to use the OS default on Windows; falls back to Chromium)
-- `BROWSER_CHANNEL=chrome|msedge` (optional, Chromium only)
+- `BROWSER_CHANNEL=chrome|msedge` (optional, Chromium only; if empty and engine=auto, it is detected)
 - `SEARCH_ENGINE_URL=https://www.google.com` (used when bootstrapping a search for browser-only tasks)
+- `UNSAFE_BROWSER_USER_DATA_DIR=auto` to reuse the default browser profile (unsafe; may be blocked by some services). Close all browser windows before запуск.
 
 ## Run
 
@@ -240,14 +249,14 @@ Dry-run режим:
 
 Выбор провайдера:
 
-- `LLM_PROVIDER=openai|anthropic|gemini|google|mock`
+- `LLM_PROVIDER=openai|anthropic|gemini|google|ollama|mock`
 
 OpenAI-compatible конфиг:
 
 ```
 LLM_PROVIDER=openai
 OPENAI_API_KEY=your_key_here
-OPENAI_MODEL=o4-mini
+OPENAI_MODEL=gpt-4.1-nano
 ```
 
 Anthropic конфиг:
@@ -263,16 +272,25 @@ Google AI Studio (Gemini) конфиг:
 ```
 LLM_PROVIDER=gemini
 GOOGLE_API_KEY=your_key_here
-GEMINI_MODEL=gemini-2.5-flash-lite
+GEMINI_MODEL=gemini-2.0-flash-lite
 ```
 
 Доступность модели Gemini проверяется на старте задачи через ListModels. Если модель недоступна или не поддерживает `generateContent`, API вернет 400 с подсказкой.
 
+Ollama (local) конфиг:
+
+```
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=qwen3:1.7b
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
 Выбор браузера и поисковика:
 
 - `BROWSER_ENGINE=auto|chromium|firefox` (auto пытается использовать браузер по умолчанию в Windows; при сбое — Chromium)
-- `BROWSER_CHANNEL=chrome|msedge` (опционально, только Chromium)
+- `BROWSER_CHANNEL=chrome|msedge` (опционально, только Chromium; если пусто и engine=auto, определяется автоматически)
 - `SEARCH_ENGINE_URL=https://www.google.com` (используется при bootstrap поиска для browser-only задач)
+- `UNSAFE_BROWSER_USER_DATA_DIR=auto` чтобы использовать профиль браузера по умолчанию (небезопасный режим; некоторые сервисы могут блокировать такой вход). Перед запуском закройте все окна браузера.
 
 ## Запуск
 

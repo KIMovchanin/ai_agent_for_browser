@@ -12,8 +12,6 @@ class SecurityPolicy:
             "trash",
             "spam",
             "unsubscribe",
-            "send",
-            "submit",
             "apply",
             "respond",
             "checkout",
@@ -22,50 +20,27 @@ class SecurityPolicy:
             "purchase",
             "buy",
             "order",
-            "confirm",
-            "approve",
-            "publish",
-            "save changes",
-            "update settings",
             "place order",
-            "sign up",
-            "register",
             "withdraw",
             "transfer",
             "delete account",
             "close account",
             "cancel subscription",
             "remove account",
-            "close",
-            "drop",
             "erase",
             "wipe",
-            "ban",
-            "block",
-            "report",
-            "decline",
-            "approve",
-            "accept",
-            "finalize",
-            "complete",
-            "charge",
-            "donate",
             "pay now",
-            "send now",
-            "apply now",
-            "submit now",
             "confirm order",
             "confirm payment",
             "confirm purchase",
             "confirm deletion",
             "confirm removal",
-            "confirm submit",
-            "confirm send",
             "confirm apply",
             "confirm checkout",
-            "confirm purchase",
             "confirm pay",
-            "confirm order",
+            "send",
+            "message",
+            "email",
         ]
         # Russian keywords via unicode escapes to keep ASCII source.
         keywords += [
@@ -76,8 +51,9 @@ class SecurityPolicy:
             "\u043e\u0442\u043a\u043b\u0438\u043a\u043d\u0443\u0442\u044c\u0441\u044f",  # откликнуться
             "\u043e\u043f\u043b\u0430\u0442\u0438\u0442\u044c",  # оплатить
             "\u0437\u0430\u043a\u0430\u0437\u0430\u0442\u044c",  # заказать
-            "\u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c",  # подтвердить
             "\u043a\u0443\u043f\u0438\u0442\u044c",  # купить
+            "\u043f\u0438\u0441\u044c\u043c\u043e",  # письмо
+            "\u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435",  # сообщение
         ]
         escaped = [re.escape(word) for word in keywords]
         pattern = "|".join(escaped)
